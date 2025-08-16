@@ -1,7 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@radix-ui/react-tabs"
-import ProfessionalCertificateEditor from "./ProfessionalCertificateEditor"
+import ProfessionalCertificateEditor from "@/professional-certificate-editor"
 
-const EditTemplatePage = ({ params, template, handleStateChange }) => {
+const EditTemplatePage = ({ params, template, handleEditorStateChange }) => {
   return (
     <div>
       <Tabs defaultValue="design">
@@ -14,9 +14,10 @@ const EditTemplatePage = ({ params, template, handleStateChange }) => {
           <div className="relative h-[calc(100vh-250px)] w-full overflow-auto">
             <div className="min-w-fit">
               <ProfessionalCertificateEditor
+                key={`cert-${template.id}`}
                 templateId={params.id}
-                onStateChange={handleStateChange}
-                initialTemplate={template}
+                initialTemplate={template.template_data}
+                onStateChange={handleEditorStateChange}
               />
             </div>
           </div>
