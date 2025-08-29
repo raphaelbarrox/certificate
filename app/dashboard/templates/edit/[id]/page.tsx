@@ -248,38 +248,37 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b">
-        <div className="px-6 py-4">
+        <div className="px-6 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/templates")}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Voltar
               </Button>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{template.title}</h1>
-                <p className="text-gray-600">{template.description}</p>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl font-bold text-gray-900 truncate">{template.title}</h1>
               </div>
-              <Badge variant={template.is_active ? "default" : "secondary"}>
+              <Badge variant={template.is_active ? "default" : "secondary"} className="flex-shrink-0">
                 {template.is_active ? "Ativo" : "Inativo"}
               </Badge>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-shrink-0">
               {hasUnsavedChanges && !saving && (
-                <span className="text-sm text-yellow-700 bg-yellow-100 px-2 py-1 rounded-md">
+                <span className="text-xs text-yellow-700 bg-yellow-100 px-2 py-1 rounded-md whitespace-nowrap">
                   Alterações não salvas
                 </span>
               )}
               <Button variant="outline" size="sm" onClick={copyPublicLink}>
-                <Copy className="h-4 w-4 mr-2" />
-                Copiar Link
+                <Copy className="h-4 w-4 mr-1" />
+                <span className="hidden sm:inline">Copiar Link</span>
               </Button>
               <Button variant="outline" size="sm" onClick={openPublicLink}>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Abrir Link
+                <ExternalLink className="h-4 w-4 mr-1" />
+                <span className="hidden sm:inline">Abrir Link</span>
               </Button>
               <Button onClick={saveTemplate} disabled={saving || !hasUnsavedChanges}>
-                <Save className="h-4 w-4 mr-2" />
+                <Save className="h-4 w-4 mr-1" />
                 {saving ? "Salvando..." : "Salvar"}
               </Button>
             </div>
@@ -288,7 +287,7 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
       </div>
 
       {/* Tabs */}
-      <div className="px-6 py-4">
+      <div className="px-6 py-2">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="info" className="flex items-center gap-2">
@@ -309,12 +308,12 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="info" className="mt-6">
+          <TabsContent value="info" className="mt-4">
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-4">
                 <CardTitle>Informações do Template</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Nome do Template</Label>
                   <Input
@@ -335,8 +334,8 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
                       setTemplate({ ...template, description: e.target.value })
                       setHasUnsavedChanges(true)
                     }}
-                    placeholder="Descrição do template"
-                    rows={3}
+                    placeholder="Descrição detalhada do template"
+                    rows={4}
                   />
                 </div>
 
@@ -384,8 +383,8 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
             </Card>
           </TabsContent>
 
-          <TabsContent value="design" className="mt-6">
-            <div className="h-[calc(100vh-250px)]">
+          <TabsContent value="design" className="mt-4">
+            <div className="h-[calc(100vh-180px)]">
               <ProfessionalCertificateEditor
                 key={`cert-${template.id}`}
                 templateId={params.id}
@@ -395,8 +394,8 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
             </div>
           </TabsContent>
 
-          <TabsContent value="form" className="mt-6">
-            <div className="h-[calc(100vh-200px)]">
+          <TabsContent value="form" className="mt-4">
+            <div className="h-[calc(100vh-160px)]">
               <FormDesigner
                 key={`form-${template.id}`}
                 initialData={template.form_design}
@@ -406,9 +405,9 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
             </div>
           </TabsContent>
 
-          <TabsContent value="link" className="mt-6">
+          <TabsContent value="link" className="mt-4">
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-4">
                 <CardTitle>Link Público de Emissão</CardTitle>
                 <p className="text-sm text-gray-600">
                   Compartilhe este link para que outras pessoas possam solicitar certificados

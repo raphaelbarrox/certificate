@@ -2,10 +2,9 @@
 
 import { Label } from "@/components/ui/label"
 
-import { useEffect, useState, type DragEvent } from "react"
+import { useEffect, useState, useCallback, useMemo, type DragEvent } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -22,6 +21,7 @@ import {
   Home,
   ChevronRight,
   LinkIcon,
+  FileText,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { supabase } from "@/lib/supabase"
@@ -31,147 +31,239 @@ import DashboardLayout from "@/components/dashboard-layout"
 import CreateFolderDialog from "@/components/create-folder-dialog"
 import { generatePublicLinkId } from "@/lib/certificate-generator"
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
+
+function useSessionStorage<T>(key: string, initialValue: T) {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    if (typeof window === "undefined") return initialValue
+    try {
+      const item = window.sessionStorage.getItem(key)
+      return item ? JSON.parse(item) : initialValue
+    } catch (error) {
+      console.warn(`Error reading sessionStorage key "${key}":`, error)
+      return initialValue
+    }
+  })
+
+  const setValue = useCallback(
+    (value: T | ((val: T) => T)) => {
+      try {
+        const valueToStore = value instanceof Function ? value(storedValue) : value
+        setStoredValue(valueToStore)
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(key, JSON.stringify(valueToStore))
+        }
+      } catch (error) {
+        console.warn(`Error setting sessionStorage key "${key}":`, error)
+      }
+    },
+    [key, storedValue],
+  )
+
+  return [storedValue, setValue] as const
+}
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([])
   const [folders, setFolders] = useState<any[]>([])
   const [currentFolder, setCurrentFolder] = useState<any>(null)
-  const [view, setView] = useState<"grid" | "list">("grid")
+  const [view, setView] = useSessionStorage<"grid" | "list">("templates-view", "grid")
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const debouncedSearchTerm = useDebounce(searchTerm, 300)
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false)
   const [foldersEnabled, setFoldersEnabled] = useState(false)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
+  const [templatesCache, setTemplatesCache] = useState<Map<string, any[]>>(new Map())
 
   const router = useRouter()
   const { toast } = useToast()
   const { user } = useAuth()
 
+  const fetchData = useCallback(
+    async (userId: string, forceRefresh = false) => {
+      const cacheKey = currentFolder ? currentFolder.id : "root"
+
+      // Check cache first unless force refresh
+      if (!forceRefresh && templatesCache.has(cacheKey)) {
+        setTemplates(templatesCache.get(cacheKey) || [])
+        setLoading(false)
+        return
+      }
+
+      setLoading(true)
+      try {
+        // Fetch templates
+        const templatesQuery = supabase
+          .from("certificate_templates")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+
+        if (currentFolder) {
+          templatesQuery.eq("folder_id", currentFolder.id)
+        } else {
+          // When in root, fetch templates without a folder_id
+          const { error: folderTableError } = await supabase.from("folders").select("id").limit(1)
+          if (!folderTableError) {
+            templatesQuery.is("folder_id", null)
+          }
+        }
+
+        const templatesRes = await templatesQuery
+        if (templatesRes.error) throw templatesRes.error
+
+        const fetchedTemplates = templatesRes.data || []
+        setTemplates(fetchedTemplates)
+
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, fetchedTemplates))
+
+        // Fetch folders, but only if not inside a folder view and not already loaded
+        if (!currentFolder && folders.length === 0) {
+          try {
+            const foldersRes = await supabase
+              .from("folders")
+              .select("*")
+              .eq("user_id", userId)
+              .order("name", { ascending: true })
+
+            if (foldersRes.error) {
+              if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
+                setFoldersEnabled(false)
+                setFolders([])
+              } else {
+                throw foldersRes.error
+              }
+            } else {
+              setFolders(foldersRes.data || [])
+              setFoldersEnabled(true)
+            }
+          } catch (folderError) {
+            console.warn("Could not fetch folders:", folderError)
+            setFoldersEnabled(false)
+            setFolders([])
+          }
+        }
+      } catch (error) {
+        console.error("Error loading data:", error)
+        toast({
+          title: "Erro ao carregar dados",
+          description: "Verifique se todas as tabelas do banco foram criadas corretamente.",
+          variant: "destructive",
+        })
+      } finally {
+        setLoading(false)
+      }
+    },
+    [currentFolder, templatesCache, folders.length, toast],
+  )
+
   useEffect(() => {
     if (user) {
       fetchData(user.id)
     }
-  }, [user, currentFolder]) // Refetch when currentFolder changes
+  }, [user, currentFolder, fetchData])
 
-  const fetchData = async (userId: string) => {
-    setLoading(true)
-    try {
-      // Fetch templates
-      const templatesQuery = supabase
-        .from("certificate_templates")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
+  const handleDuplicate = useCallback(
+    async (templateId: string) => {
+      const original = templates.find((t) => t.id === templateId)
+      if (!original) return
 
-      if (currentFolder) {
-        templatesQuery.eq("folder_id", currentFolder.id)
-      } else {
-        // When in root, fetch templates without a folder_id
-        // We need to check if folders are enabled first
-        const { error: folderTableError } = await supabase.from("folders").select("id").limit(1)
-        if (!folderTableError) {
-          templatesQuery.is("folder_id", null)
-        }
+      const { id, created_at, updated_at, public_link_id, ...rest } = original
+      const newTemplate = {
+        ...rest,
+        title: `${original.title} (Cópia)`,
+        public_link_id: generatePublicLinkId(),
+        is_active: false,
       }
 
-      const templatesRes = await templatesQuery
-      if (templatesRes.error) throw templatesRes.error
-      setTemplates(templatesRes.data || [])
+      try {
+        const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
+        if (error) throw error
 
-      // Fetch folders, but only if not inside a folder view
-      if (!currentFolder) {
-        try {
-          const foldersRes = await supabase
-            .from("folders")
-            .select("*")
-            .eq("user_id", userId)
-            .order("name", { ascending: true })
+        const updatedTemplates = [data, ...templates]
+        setTemplates(updatedTemplates)
 
-          if (foldersRes.error) {
-            if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
-              setFoldersEnabled(false)
-              setFolders([])
-            } else {
-              throw foldersRes.error
-            }
-          } else {
-            setFolders(foldersRes.data || [])
-            setFoldersEnabled(true)
-          }
-        } catch (folderError) {
-          console.warn("Could not fetch folders:", folderError)
-          setFoldersEnabled(false)
-          setFolders([])
-        }
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+
+        toast({ title: "Template duplicado!" })
+      } catch (error) {
+        toast({ title: "Erro ao duplicar", variant: "destructive" })
       }
-    } catch (error) {
-      console.error("Error loading data:", error)
+    },
+    [templates, currentFolder, toast],
+  )
+
+  const handleCopyLink = useCallback(
+    (publicLinkId: string) => {
+      const url = `${window.location.origin}/issue/${publicLinkId}`
+      navigator.clipboard.writeText(url)
       toast({
-        title: "Erro ao carregar dados",
-        description: "Verifique se todas as tabelas do banco foram criadas corretamente.",
-        variant: "destructive",
+        title: "Link copiado!",
+        description: "O link público foi copiado para a área de transferência.",
       })
-    } finally {
-      setLoading(false)
-    }
-  }
+    },
+    [toast],
+  )
 
-  const handleDuplicate = async (templateId: string) => {
-    const original = templates.find((t) => t.id === templateId)
-    if (!original) return
+  const toggleTemplateStatus = useCallback(
+    async (templateId: string, currentStatus: boolean) => {
+      try {
+        const { error } = await supabase
+          .from("certificate_templates")
+          .update({ is_active: !currentStatus })
+          .eq("id", templateId)
+        if (error) throw error
 
-    const { id, created_at, updated_at, public_link_id, ...rest } = original
-    const newTemplate = {
-      ...rest,
-      title: `${original.title} (Cópia)`,
-      public_link_id: generatePublicLinkId(),
-      is_active: false,
-    }
+        const updatedTemplates = templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t))
+        setTemplates(updatedTemplates)
 
-    try {
-      const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
-      if (error) throw error
-      // Add to current view
-      setTemplates((prev) => [data, ...prev])
-      toast({ title: "Template duplicado!" })
-    } catch (error) {
-      toast({ title: "Erro ao duplicar", variant: "destructive" })
-    }
-  }
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
 
-  const handleCopyLink = (publicLinkId: string) => {
-    const url = `${window.location.origin}/issue/${publicLinkId}`
-    navigator.clipboard.writeText(url)
-    toast({
-      title: "Link copiado!",
-      description: "O link público foi copiado para a área de transferência.",
-    })
-  }
+        toast({ title: "Status atualizado" })
+      } catch (error) {
+        toast({ title: "Erro ao atualizar status", variant: "destructive" })
+      }
+    },
+    [templates, currentFolder, toast],
+  )
 
-  const toggleTemplateStatus = async (templateId: string, currentStatus: boolean) => {
-    try {
-      const { error } = await supabase
-        .from("certificate_templates")
-        .update({ is_active: !currentStatus })
-        .eq("id", templateId)
-      if (error) throw error
-      setTemplates(templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t)))
-      toast({ title: "Status atualizado" })
-    } catch (error) {
-      toast({ title: "Erro ao atualizar status", variant: "destructive" })
-    }
-  }
+  const deleteTemplate = useCallback(
+    async (templateId: string) => {
+      if (!confirm("Tem certeza? Esta ação não pode ser desfeita.")) return
+      try {
+        const { error } = await supabase.from("certificate_templates").delete().eq("id", templateId)
+        if (error) throw error
 
-  const deleteTemplate = async (templateId: string) => {
-    if (!confirm("Tem certeza? Esta ação não pode ser desfeita.")) return
-    try {
-      const { error } = await supabase.from("certificate_templates").delete().eq("id", templateId)
-      if (error) throw error
-      setTemplates(templates.filter((t) => t.id !== templateId))
-      toast({ title: "Template excluído" })
-    } catch (error) {
-      toast({ title: "Erro ao excluir", variant: "destructive" })
-    }
-  }
+        const updatedTemplates = templates.filter((t) => t.id !== templateId)
+        setTemplates(updatedTemplates)
+
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+
+        toast({ title: "Template excluído" })
+      } catch (error) {
+        toast({ title: "Erro ao excluir", variant: "destructive" })
+      }
+    },
+    [templates, currentFolder, toast],
+  )
 
   const deleteFolder = async (folderId: string) => {
     if (
@@ -196,81 +288,172 @@ export default function TemplatesPage() {
       if (deleteError) throw deleteError
 
       setFolders(folders.filter((f) => f.id !== folderId))
+      setTemplatesCache(new Map())
       toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
     } catch (error) {
       toast({ title: "Erro ao excluir pasta", variant: "destructive" })
     }
   }
 
-  const handleDrop = async (e: DragEvent<HTMLDivElement>, folderId: string) => {
-    e.preventDefault()
-    const templateId = e.dataTransfer.getData("templateId")
-    setDragOverFolderId(null)
+  const handleDrop = useCallback(
+    async (e: DragEvent<HTMLDivElement>, folderId: string) => {
+      e.preventDefault()
+      const templateId = e.dataTransfer.getData("templateId")
+      setDragOverFolderId(null)
 
-    if (!templateId || !folderId) return
+      if (!templateId || !folderId) return
 
-    try {
-      const { error } = await supabase
-        .from("certificate_templates")
-        .update({ folder_id: folderId })
-        .eq("id", templateId)
+      try {
+        const { error } = await supabase
+          .from("certificate_templates")
+          .update({ folder_id: folderId })
+          .eq("id", templateId)
 
-      if (error) throw error
+        if (error) throw error
 
-      // Optimistic update: remove from UI and show toast
-      setTemplates((prev) => prev.filter((t) => t.id !== templateId))
-      toast({
-        title: "Template movido!",
-        description: "O template foi movido para a pasta.",
-      })
-    } catch (error) {
-      toast({ title: "Erro ao mover template", variant: "destructive" })
-    }
-  }
+        const updatedTemplates = templates.filter((t) => t.id !== templateId)
+        setTemplates(updatedTemplates)
 
-  const filteredItems = () => {
-    const lowerSearchTerm = searchTerm.toLowerCase()
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+
+        toast({
+          title: "Template movido!",
+          description: "O template foi movido para a pasta.",
+        })
+      } catch (error) {
+        toast({ title: "Erro ao mover template", variant: "destructive" })
+      }
+    },
+    [templates, currentFolder, toast],
+  )
+
+  const filteredItems = useMemo(() => {
+    const lowerSearchTerm = debouncedSearchTerm.toLowerCase()
     const filteredFolders = foldersEnabled ? folders.filter((f) => f.name.toLowerCase().includes(lowerSearchTerm)) : []
     const filteredTemplates = templates.filter((t) => t.title.toLowerCase().includes(lowerSearchTerm))
     return { filteredFolders, filteredTemplates }
-  }
+  }, [debouncedSearchTerm, foldersEnabled, folders, templates])
 
-  const { filteredFolders, filteredTemplates } = filteredItems()
+  const { filteredFolders, filteredTemplates } = filteredItems
 
-  const renderTemplateCard = (template: any) => (
-    <div
-      key={template.id}
-      className="border rounded-lg shadow-sm bg-white flex flex-col transition-transform hover:-translate-y-1"
-      draggable="true"
-      onDragStart={(e) => e.dataTransfer.setData("templateId", template.id)}
-    >
-      <Link
-        href={`/dashboard/templates/edit/${template.id}`}
-        className="block aspect-video bg-gray-100 rounded-t-lg relative overflow-hidden group"
+  const renderTemplateCard = useCallback(
+    (template: any) => (
+      <div
+        key={template.id}
+        className="border rounded-lg shadow-sm bg-white flex flex-col transition-transform hover:-translate-y-1"
+        draggable="true"
+        onDragStart={(e) => e.dataTransfer.setData("templateId", template.id)}
       >
-        {template.thumbnail_url ? (
-          <Image
-            src={template.thumbnail_url || "/placeholder.svg"}
-            alt={`Thumbnail of ${template.title}`}
-            fill
-            className="object-cover group-hover:scale-105 transition-transform duration-300"
+        <Link
+          href={`/dashboard/templates/edit/${template.id}`}
+          className="block aspect-video bg-gray-100 rounded-t-lg relative overflow-hidden group"
+        >
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+            <FileText className="h-16 w-16 text-blue-400" />
+          </div>
+        </Link>
+        <div className="p-4 flex-grow flex flex-col">
+          <div className="flex justify-between items-start">
+            <h3 className="font-semibold truncate flex-1 pr-2">{template.title}</h3>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => router.push(`/dashboard/templates/edit/${template.id}`)}>
+                  <Edit className="h-4 w-4 mr-2" /> Editar
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
+                  <Copy className="h-4 w-4 mr-2" /> Duplicar
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
+                  <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => deleteTemplate(template.id)} className="text-red-500">
+                  <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            {new Date(template.created_at).toLocaleDateString("pt-BR")} • {template.placeholders?.length || 0} campos
+          </p>
+          <div className="flex-grow" />
+          <div className="flex justify-between items-center mt-4 pt-4 border-t">
+            <div className="flex items-center space-x-2">
+              <Switch
+                checked={template.is_active}
+                onCheckedChange={() => toggleTemplateStatus(template.id, template.is_active)}
+                id={`active-${template.id}`}
+              />
+              <Label htmlFor={`active-${template.id}`} className="text-sm">
+                Ativo
+              </Label>
+            </div>
+            <div className="flex items-center space-x-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title="Editar"
+                onClick={() => router.push(`/dashboard/templates/edit/${template.id}`)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title="Duplicar"
+                onClick={() => handleDuplicate(template.id)}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                title="Copiar Link Público"
+                onClick={() => handleCopyLink(template.public_link_id)}
+              >
+                <LinkIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ),
+    [router, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
+  )
+
+  const renderTemplateRow = useCallback(
+    (template: any) => (
+      <div
+        key={template.id}
+        className="flex items-center p-2 border-b hover:bg-gray-50"
+        draggable="true"
+        onDragStart={(e) => e.dataTransfer.setData("templateId", template.id)}
+      >
+        <div className="w-16 h-10 bg-gray-100 rounded-md relative overflow-hidden mr-4 flex-shrink-0">
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+            <FileText className="h-6 w-6 text-blue-400" />
+          </div>
+        </div>
+        <div className="flex-grow font-medium truncate">{template.title}</div>
+        <div className="w-32 text-sm text-gray-500">{new Date(template.created_at).toLocaleDateString("pt-BR")}</div>
+        <div className="w-24">
+          <Switch
+            checked={template.is_active}
+            onCheckedChange={() => toggleTemplateStatus(template.id, template.is_active)}
           />
-        ) : (
-          <Image
-            src={`/api/templates/${template.id}/thumbnail`}
-            alt={`Thumbnail of ${template.title}`}
-            fill
-            className="object-cover group-hover:scale-105 transition-transform duration-300"
-            unoptimized
-          />
-        )}
-      </Link>
-      <div className="p-4 flex-grow flex flex-col">
-        <div className="flex justify-between items-start">
-          <h3 className="font-semibold truncate flex-1 pr-2">{template.title}</h3>
+        </div>
+        <div className="w-24 flex justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0">
+              <Button variant="ghost" size="icon" className="h-8 w-8">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -290,113 +473,21 @@ export default function TemplatesPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <p className="text-xs text-gray-500 mt-1">
-          {new Date(template.created_at).toLocaleDateString("pt-BR")} • {template.placeholders?.length || 0} campos
-        </p>
-        <div className="flex-grow" />
-        <div className="flex justify-between items-center mt-4 pt-4 border-t">
-          <div className="flex items-center space-x-2">
-            <Switch
-              checked={template.is_active}
-              onCheckedChange={() => toggleTemplateStatus(template.id, template.is_active)}
-              id={`active-${template.id}`}
-            />
-            <Label htmlFor={`active-${template.id}`} className="text-sm">
-              Ativo
-            </Label>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Editar"
-              onClick={() => router.push(`/dashboard/templates/edit/${template.id}`)}
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Duplicar"
-              onClick={() => handleDuplicate(template.id)}
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              title="Copiar Link Público"
-              onClick={() => handleCopyLink(template.public_link_id)}
-            >
-              <LinkIcon className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
       </div>
-    </div>
+    ),
+    [router, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
   )
 
-  const renderTemplateRow = (template: any) => (
-    <div
-      key={template.id}
-      className="flex items-center p-2 border-b hover:bg-gray-50"
-      draggable="true"
-      onDragStart={(e) => e.dataTransfer.setData("templateId", template.id)}
-    >
-      <div className="w-16 h-10 bg-gray-100 rounded-md relative overflow-hidden mr-4 flex-shrink-0">
-        {template.thumbnail_url ? (
-          <Image
-            src={template.thumbnail_url || "/placeholder.svg"}
-            alt={template.title}
-            fill
-            className="object-cover"
-          />
-        ) : (
-          <Image
-            src={`/api/templates/${template.id}/thumbnail`}
-            alt={template.title}
-            fill
-            className="object-cover"
-            unoptimized
-          />
-        )}
-      </div>
-      <div className="flex-grow font-medium truncate">{template.title}</div>
-      <div className="w-32 text-sm text-gray-500">{new Date(template.created_at).toLocaleDateString("pt-BR")}</div>
-      <div className="w-24">
-        <Switch
-          checked={template.is_active}
-          onCheckedChange={() => toggleTemplateStatus(template.id, template.is_active)}
-        />
-      </div>
-      <div className="w-24 flex justify-end">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => router.push(`/dashboard/templates/edit/${template.id}`)}>
-              <Edit className="h-4 w-4 mr-2" /> Editar
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
-              <Copy className="h-4 w-4 mr-2" /> Duplicar
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
-              <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => deleteTemplate(template.id)} className="text-red-500">
-              <Trash2 className="h-4 w-4 mr-2" /> Excluir
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  )
+  const handleFolderNavigation = useCallback((folder: any) => {
+    setCurrentFolder(folder)
+    // Clear search when navigating to folder
+    setSearchTerm("")
+  }, [])
+
+  const handleBackToRoot = useCallback(() => {
+    setCurrentFolder(null)
+    setSearchTerm("")
+  }, [])
 
   return (
     <DashboardLayout>
@@ -404,7 +495,12 @@ export default function TemplatesPage() {
         <CreateFolderDialog
           open={isFolderDialogOpen}
           onOpenChange={setIsFolderDialogOpen}
-          onFolderCreated={() => fetchData(user!.id)}
+          onFolderCreated={() => {
+            if (user) {
+              setTemplatesCache(new Map())
+              fetchData(user.id, true)
+            }
+          }}
         />
       )}
       <div className="space-y-6">
@@ -412,7 +508,7 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-bold text-gray-900">Meus Templates</h1>
           {foldersEnabled && (
             <div className="flex items-center text-sm text-gray-500 mt-2">
-              <button onClick={() => setCurrentFolder(null)} className="hover:underline flex items-center">
+              <button onClick={handleBackToRoot} className="hover:underline flex items-center">
                 <Home className="h-4 w-4 mr-1" /> Início
               </button>
               {currentFolder && (
@@ -460,6 +556,7 @@ export default function TemplatesPage() {
         {loading ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="text-gray-600 mt-2">Carregando templates...</p>
           </div>
         ) : (
           <>
@@ -482,7 +579,7 @@ export default function TemplatesPage() {
                         }`}
                       >
                         <button
-                          onClick={() => setCurrentFolder(folder)}
+                          onClick={() => handleFolderNavigation(folder)}
                           className="flex items-center p-4 w-full h-full text-left"
                         >
                           <FolderIcon className="h-5 w-5 mr-3" style={{ color: folder.color }} />
@@ -541,12 +638,16 @@ export default function TemplatesPage() {
                 )
               ) : (
                 <div className="text-center py-12">
-                  <p className="text-sm text-gray-500 mb-4">Nenhum template encontrado.</p>
-                  <Link href="/dashboard/templates/create">
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" /> Criar seu primeiro template
-                    </Button>
-                  </Link>
+                  <p className="text-sm text-gray-500 mb-4">
+                    {debouncedSearchTerm ? "Nenhum template encontrado para sua busca." : "Nenhum template encontrado."}
+                  </p>
+                  {!debouncedSearchTerm && (
+                    <Link href="/dashboard/templates/create">
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" /> Criar seu primeiro template
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               )}
             </div>

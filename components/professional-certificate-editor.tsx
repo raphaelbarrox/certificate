@@ -438,19 +438,49 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
   ])
 
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1024) {
-        setZoom(0.5)
-      } else if (window.innerWidth < 1440) {
-        setZoom(0.7)
-      } else {
-        setZoom(0.8)
-      }
+    const calculateOptimalZoom = () => {
+      // Larguras fixas das barras laterais
+      const leftSidebarWidth = 400
+      const rightSidebarWidth = 320
+      const padding = 32 // 16px de cada lado
+
+      // Espaço disponível para o canvas
+      const availableWidth = window.innerWidth - leftSidebarWidth - rightSidebarWidth - padding
+      const availableHeight = window.innerHeight - 200 // Reserva espaço para header e toolbar
+
+      // Calcula zoom baseado nas dimensões do canvas
+      const zoomByWidth = availableWidth / canvasSize.width
+      const zoomByHeight = availableHeight / canvasSize.height
+
+      // Usa o menor zoom para garantir que tudo caiba
+      const optimalZoom = Math.min(zoomByWidth, zoomByHeight, 1.2) // Máximo 120%
+
+      // Zoom mínimo de 30% para manter usabilidade
+      const finalZoom = Math.max(optimalZoom, 0.3)
+
+      console.log("[v0] Auto-zoom calculado:", {
+        availableWidth,
+        availableHeight,
+        canvasSize,
+        zoomByWidth,
+        zoomByHeight,
+        finalZoom,
+      })
+
+      setZoom(finalZoom)
     }
-    handleResize()
+
+    // Calcula zoom inicial
+    calculateOptimalZoom()
+
+    // Recalcula no resize da janela
+    const handleResize = () => {
+      calculateOptimalZoom()
+    }
+
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
-  }, [])
+  }, [canvasSize])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, elementId: string, handle?: string) => {
@@ -1417,6 +1447,9 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Zoom do Editor</Label>
+                      <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                        <span>Auto-ajustado para caber na tela</span>
+                      </div>
                       <Slider
                         value={[zoom]}
                         onValueChange={([value]) => setZoom(value)}
@@ -1677,225 +1710,246 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                 <div
                   className="absolute inset-0 opacity-5 pointer-events-none"
                   style={{
-                    backgroundImage: `
-  linear-gradient(to right, #000 1px, transparent 1px),
-  linear-gradient(to bottom, #000 1px, transparent 1px)
-`,
-                    backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3Cpattern id='grid' width='10' height='10' patternUnits='userSpaceOnUse'%3E%3Cpath d='M10 0H0V10H10V0Z' fill='%23f0f0f0'/%3E%3Cpath d='M0 0L10 10' stroke='%23e0e0e0' strokeWidth='0.5'/%3E%3Cpath d='M10 0L0 10' stroke='%23e0e0e0' strokeWidth='0.5'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width='100' height='100' fill='url(%23grid)'/%3E%3C/svg%3E")`,
                   }}
                 />
               )}
               {elements.sort((a, b) => a.zIndex - b.zIndex).map((element) => renderElement(element, showPreview))}
-              {!showPreview && (
-                <div className="absolute bottom-2 left-2 text-xs text-gray-400 pointer-events-none bg-white px-2 py-1 rounded shadow">
-                  Certificado A4 • {Math.round(zoom * 100)}% • {canvasSize.width}x{canvasSize.height}px
-                </div>
-              )}
-              {elements.length === 0 && !showPreview && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                  <div className="text-center">
-                    <Type className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">Comece criando seu certificado</p>
-                    <p className="text-sm">Adicione textos, imagens e placeholders</p>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Sidebar Direita - Propriedades */}
-      <div className="w-[320px] flex-shrink-0 bg-white border-l">
-        <div className="p-4 border-b flex justify-between items-center">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-sm truncate">Propriedades</h3>
-            <p className="text-xs text-gray-600 truncate">
-              {selectedElementData?.type === "text" && "Elemento de Texto"}
-              {selectedElementData?.type === "placeholder" && "Placeholder Dinâmico"}
-              {selectedElementData?.type === "image" && "Elemento de Imagem"}
-              {selectedElementData?.type === "image-placeholder" && "Placeholder de Imagem"}
-              {selectedElementData?.type === "qrcode" && "Elemento QR Code"}
-              {!selectedElementData && "Nenhum elemento selecionado"}
-            </p>
-          </div>
+      {/* Sidebar Direita - Configurações do Elemento */}
+      <div className="w-[320px] bg-white border-l flex-shrink-0 flex flex-col">
+        <div className="p-4 border-b">
+          <h2 className="text-lg font-semibold">
+            {selectedElement ? "Configurações do Elemento" : "Nenhum Elemento Selecionado"}
+          </h2>
+          <p className="text-sm text-gray-600">Ajuste as propriedades do elemento selecionado</p>
         </div>
-        {selectedElementData && (
-          <ScrollArea className="h-[calc(100%-65px)]">
+        {selectedElement ? (
+          <ScrollArea className="flex-1">
             <div className="p-4 space-y-4">
-              {selectedElementData.type !== "image" && (
-                <div className="space-y-2">
-                  <Label className="text-xs">Conteúdo</Label>
-                  <Input
-                    value={selectedElementData.content}
-                    onChange={(e) => updateSelectedElement({ content: e.target.value })}
-                    disabled={
-                      selectedElementData.type === "placeholder" || selectedElementData.type === "image-placeholder"
-                    }
-                    className="text-sm"
-                    placeholder="Digite o texto..."
-                  />
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label className="text-xs">Posição X</Label>
-                  <Input
-                    type="number"
-                    value={Math.round(selectedElementData.x)}
-                    onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
-                    className="text-sm"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Posição Y</Label>
-                  <Input
-                    type="number"
-                    value={Math.round(selectedElementData.y)}
-                    onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
-                    className="text-sm"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label className="text-xs">Largura</Label>
-                  <Input
-                    type="number"
-                    value={Math.round(selectedElementData.width)}
-                    onChange={(e) => updateSelectedElement({ width: Math.max(20, Number(e.target.value)) })}
-                    className="text-sm"
-                    min="20"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Altura</Label>
-                  <Input
-                    type="number"
-                    value={Math.round(selectedElementData.height)}
-                    onChange={(e) => updateSelectedElement({ height: Math.max(20, Number(e.target.value)) })}
-                    className="text-sm"
-                    min="20"
-                    disabled={selectedElementData.type === "text" || selectedElementData.type === "placeholder"}
-                  />
-                </div>
-              </div>
-              {selectedElementData.type !== "image" && selectedElementData.type !== "image-placeholder" && (
-                <>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Geral</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
                   <div className="space-y-2">
-                    <Label className="text-xs">Fonte</Label>
-                    <Select
-                      value={selectedElementData.fontFamily}
-                      onValueChange={(value) => updateSelectedElement({ fontFamily: value })}
-                    >
-                      <SelectTrigger className="text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FONT_FAMILIES.map((font) => (
-                          <SelectItem key={font.value} value={font.value}>
-                            {font.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-xs">Conteúdo</Label>
+                    {selectedElementData?.type === "image" ? (
+                      <p className="text-sm text-gray-500">Imagem estática</p>
+                    ) : selectedElementData?.type === "qrcode" ? (
+                      <p className="text-sm text-gray-500">QR Code</p>
+                    ) : (
+                      <Input
+                        type="text"
+                        value={selectedElementData?.content}
+                        onChange={(e) => updateSelectedElement({ content: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    )}
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs">Tamanho da Fonte</Label>
-                    <Slider
-                      value={[selectedElementData.fontSize]}
-                      onValueChange={([value]) => updateSelectedElement({ fontSize: value })}
-                      min={8}
-                      max={72}
-                      step={1}
-                      className="w-full"
+                    <Label className="text-xs">Posição X (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.x}
+                      onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
+                      className="h-8 text-sm"
                     />
-                    <div className="text-xs text-gray-500 text-center">{selectedElementData.fontSize}px</div>
                   </div>
-                </>
-              )}
-              <div className="space-y-2">
-                <Label className="text-xs">Opacidade</Label>
-                <Slider
-                  value={[selectedElementData.opacity]}
-                  onValueChange={([value]) => updateSelectedElement({ opacity: value })}
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  className="w-full"
-                />
-                <div className="text-xs text-gray-500 text-center">
-                  {Math.round(selectedElementData.opacity * 100)}%
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">Rotação</Label>
-                <Slider
-                  value={[selectedElementData.rotation]}
-                  onValueChange={([value]) => updateSelectedElement({ rotation: value })}
-                  min={-180}
-                  max={180}
-                  step={1}
-                  className="w-full"
-                />
-                <div className="text-xs text-gray-500 text-center">{selectedElementData.rotation}°</div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">Cor de Fundo</Label>
-                <div className="flex space-x-2">
-                  <Input
-                    type="color"
-                    value={
-                      selectedElementData.backgroundColor === "transparent"
-                        ? "#ffffff"
-                        : selectedElementData.backgroundColor
-                    }
-                    onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
-                    className="w-12 h-8 p-0"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => updateSelectedElement({ backgroundColor: "transparent" })}
-                    className="text-xs flex-1"
-                  >
-                    Transparente
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">Borda</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="number"
-                    placeholder="Espessura"
-                    value={selectedElementData.borderWidth}
-                    onChange={(e) => updateSelectedElement({ borderWidth: Number(e.target.value) })}
-                    className="text-sm"
-                    min="0"
-                  />
-                  <Input
-                    type="color"
-                    value={selectedElementData.borderColor}
-                    onChange={(e) => updateSelectedElement({ borderColor: e.target.value })}
-                    className="h-8 p-0"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">Borda Arredondada</Label>
-                <Slider
-                  value={[selectedElementData.borderRadius]}
-                  onValueChange={([value]) => updateSelectedElement({ borderRadius: value })}
-                  min={0}
-                  max={50}
-                  step={1}
-                  className="w-full"
-                />
-                <div className="text-xs text-gray-500 text-center">{selectedElementData.borderRadius}px</div>
-              </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Posição Y (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.y}
+                      onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Largura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.width}
+                      onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Altura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.height}
+                      onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+              {selectedElementData?.type === "text" || selectedElementData?.type === "placeholder" ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Texto</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Fonte</Label>
+                      <Select
+                        value={selectedElementData?.fontFamily}
+                        onValueChange={(value) => updateSelectedElement({ fontFamily: value })}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FONT_FAMILIES.map((font) => (
+                            <SelectItem key={font.value} value={font.value}>
+                              {font.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Tamanho da Fonte (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.fontSize}
+                        onChange={(e) => updateSelectedElement({ fontSize: Number(e.target.value) })}
+                        className="h-8 text-sm"
+                        min="8"
+                        max="72"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Cor do Texto</Label>
+                      <div className="flex items-center space-x-2">
+                        <Input
+                          type="color"
+                          value={selectedElementData?.color || "#000000"}
+                          onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                          className="w-12 h-10 p-1 border rounded"
+                        />
+                        <Input
+                          type="text"
+                          value={selectedElementData?.color || "#000000"}
+                          onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                          className="flex-1 h-10 text-sm"
+                          placeholder="#000000"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Alinhamento</Label>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "left" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "left" })}
+                        >
+                          <AlignLeft className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "center" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "center" })}
+                        >
+                          <AlignCenter className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "right" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "right" })}
+                        >
+                          <AlignRight className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Aparência</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Opacidade</Label>
+                    <Slider
+                      value={[selectedElementData?.opacity || 1]}
+                      onValueChange={([value]) => updateSelectedElement({ opacity: value })}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Cor de Fundo</Label>
+                    <div className="flex items-center space-x-2">
+                      <Input
+                        type="color"
+                        value={selectedElementData?.backgroundColor || "#ffffff"}
+                        onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
+                        className="w-12 h-10 p-1 border rounded"
+                      />
+                      <Input
+                        type="text"
+                        value={selectedElementData?.backgroundColor || "#ffffff"}
+                        onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
+                        className="flex-1 h-10 text-sm"
+                        placeholder="#ffffff"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Borda</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label htmlFor="border-width" className="text-xs font-normal text-gray-500">
+                          Largura
+                        </Label>
+                        <Input
+                          id="border-width"
+                          type="number"
+                          value={selectedElementData?.borderWidth}
+                          onChange={(e) => updateSelectedElement({ borderWidth: Number(e.target.value) })}
+                          className="h-8 text-sm"
+                          placeholder="Largura"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="border-color" className="text-xs font-normal text-gray-500">
+                          Cor
+                        </Label>
+                        <Input
+                          type="color"
+                          value={selectedElementData?.borderColor || "#000000"}
+                          onChange={(e) => updateSelectedElement({ borderColor: e.target.value })}
+                          className="w-12 h-10 p-1 border rounded"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Raio da Borda</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.borderRadius}
+                      onChange={(e) => updateSelectedElement({ borderRadius: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </ScrollArea>
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-4 text-center text-gray-500">
+            Selecione um elemento para editar suas propriedades.
+          </div>
         )}
       </div>
     </div>
