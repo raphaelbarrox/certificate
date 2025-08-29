@@ -324,31 +324,80 @@ export default function TemplatesPage() {
 
   const handleDuplicate = useCallback(
     async (templateId: string) => {
-      const original = templates.find((t) => t.id === templateId)
-      if (!original) return
+      console.log(`[v0] DUPLICATE START: templateId=${templateId}`)
 
-      const { id, created_at, updated_at, public_link_id, ...rest } = original
-      const newTemplate = {
-        ...rest,
-        title: `${original.title} (Cópia)`,
-        public_link_id: generatePublicLinkId(),
-        is_active: false,
+      const original = templates.find((t) => t.id === templateId)
+      if (!original) {
+        console.error(`[v0] DUPLICATE ERROR: Template not found with id ${templateId}`)
+        toast({ title: "Erro: Template não encontrado", variant: "destructive" })
+        return
       }
 
+      console.log(`[v0] DUPLICATE: Found original template "${original.title}"`)
+
       try {
-        const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
-        if (error) throw error
+        console.log(`[v0] DUPLICATE: Fetching complete template data...`)
+        const { data: fullTemplate, error: fetchError } = await supabase
+          .from("certificate_templates")
+          .select("*")
+          .eq("id", templateId)
+          .single()
+
+        if (fetchError) {
+          console.error(`[v0] DUPLICATE ERROR: Failed to fetch complete template:`, fetchError)
+          throw fetchError
+        }
+
+        console.log(
+          `[v0] DUPLICATE: Complete template data fetched, size: ${JSON.stringify(fullTemplate).length} chars`,
+        )
+
+        const { id, created_at, updated_at, public_link_id, ...rest } = fullTemplate
+        const newPublicLinkId = generatePublicLinkId()
+
+        const newTemplate = {
+          ...rest,
+          title: `${fullTemplate.title} (Cópia)`,
+          public_link_id: newPublicLinkId,
+          is_active: false,
+        }
+
+        console.log(`[v0] DUPLICATE: Prepared new template with public_link_id: ${newPublicLinkId}`)
+        console.log(`[v0] DUPLICATE: New template data size: ${JSON.stringify(newTemplate).length} chars`)
+
+        const { data, error } = await supabase
+          .from("certificate_templates")
+          .insert(newTemplate)
+          .select("id, title, description, is_active, created_at, public_link_id, folder_id")
+          .single()
+
+        if (error) {
+          console.error(`[v0] DUPLICATE ERROR: Insert failed:`, error)
+          throw error
+        }
+
+        console.log(`[v0] DUPLICATE SUCCESS: New template created with id ${data.id}`)
 
         const updatedTemplates = [data, ...templates]
         setTemplates(updatedTemplates)
 
         const cacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
         cache.delete(cacheKey)
+        console.log(`[v0] DUPLICATE: Cache invalidated for key: ${cacheKey}`)
 
-        toast({ title: "Template duplicado!" })
+        toast({
+          title: "Template duplicado com sucesso!",
+          description: `"${data.title}" foi criado.`,
+        })
       } catch (error) {
-        console.error("[v0] Duplicate error:", error)
-        toast({ title: "Erro ao duplicar", variant: "destructive" })
+        console.error("[v0] DUPLICATE ERROR: Complete process failed:", error)
+
+        const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+        toast({
+          title: "Erro ao duplicar template",
+          description: `Detalhes: ${errorMessage}`,
+          variant: "destructive",
+        })
       }
     },
     [templates, currentFolder, toast, supabase],
