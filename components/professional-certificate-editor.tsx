@@ -38,7 +38,6 @@ import {
   Loader,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { Textarea } from "@/components/ui/textarea"
 
 interface CertificateElement {
   id: string
@@ -193,6 +192,8 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
 
   const hasRealChanges = useCallback(
     (currentState: any) => {
+      if (!lastSavedState) return true // Se não há estado salvo, considera como mudança
+
       const currentStateString = JSON.stringify({
         elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
         backgroundImage: currentState.backgroundImage,
@@ -201,7 +202,9 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
         canvasSize: currentState.canvasSize,
       })
 
-      return currentStateString !== lastSavedState
+      const hasChanges = currentStateString !== lastSavedState
+      console.log(`[v0] Change detection: ${hasChanges ? "HAS CHANGES" : "NO CHANGES"}`)
+      return hasChanges
     },
     [lastSavedState],
   )
@@ -217,19 +220,31 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       canvasSize,
     }
 
-    // Só processa se houver mudanças reais
-    if (!hasRealChanges(currentState)) {
+    const hasChanges = hasRealChanges(currentState)
+
+    if (hasChanges && saveStatus === "saved") {
+      console.log("[v0] Detected changes, setting status to unsaved")
+      setSaveStatus("unsaved")
+    }
+
+    if (!hasChanges && saveStatus === "unsaved") {
+      console.log("[v0] No changes detected, keeping current status")
       return
     }
 
-    setSaveStatus("unsaved")
+    if (!hasChanges) {
+      return
+    }
 
     // Debounce inteligente: 2 segundos para mudanças normais, 5 segundos para mudanças grandes
     const stateSize = JSON.stringify(currentState).length
     const debounceTime = stateSize > 100000 ? 5000 : 2000 // 100KB threshold
 
     const handler = setTimeout(async () => {
+      if (saveStatus !== "unsaved") return // Evitar saves desnecessários
+
       setSaveStatus("saving")
+      console.log("[v0] Starting autosave...")
 
       try {
         const stateString = JSON.stringify(currentState)
@@ -267,6 +282,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
         // Tentar salvar no localStorage
         try {
           localStorage.setItem(localStorageKey, stateString)
+
           setLastSavedState(
             JSON.stringify({
               elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
@@ -347,13 +363,150 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
     backgroundColor,
     placeholders,
     canvasSize,
-    localStorageKey,
-    onStateChange,
     isInitialized,
     hasRealChanges,
-    lastSavedState,
-    toast,
+    saveStatus, // Adicionar saveStatus às dependências
+    localStorageKey,
+    onStateChange,
   ])
+
+  useEffect(() => {
+    const currentState = {
+      elements,
+      backgroundImage,
+      backgroundColor,
+      placeholders,
+      canvasSize,
+    }
+
+    // Detecção imediata de mudanças para habilitar botão save
+    if (hasRealChanges(currentState)) {
+      if (saveStatus !== "unsaved") {
+        setSaveStatus("unsaved")
+        console.log("[v0] Change detected: Button enabled immediately")
+      }
+    }
+
+    // Autosave com debounce separado
+    const stateSize = JSON.stringify(currentState).length
+    const debounceTime = stateSize > 100000 ? 3000 : 1000 // Reduzido: 3s para grandes, 1s para pequenos
+
+    const handler = setTimeout(async () => {
+      if (saveStatus !== "unsaved") return
+
+      setSaveStatus("saving")
+      console.log("[v0] Starting autosave...")
+
+      try {
+        const stateString = JSON.stringify(currentState)
+        const currentSize = new Blob([stateString]).size
+
+        console.log("[v0] Iniciando autosave:", {
+          size: `${(currentSize / 1024).toFixed(2)}KB`,
+          elements: elements.length,
+          hasBackground: !!backgroundImage,
+        })
+
+        if (currentSize > 3 * 1024 * 1024) {
+          // 3MB limit
+          console.log("[v0] Estado grande detectado, limpando dados antigos")
+
+          // Limpar estados antigos de outros templates
+          Object.keys(localStorage).forEach((key) => {
+            if (key.startsWith("editor-state-") && key !== localStorageKey) {
+              localStorage.removeItem(key)
+            }
+          })
+
+          // Limpar outros dados desnecessários
+          Object.keys(localStorage).forEach((key) => {
+            if (key.includes("formData-") || key.includes("formPreviews-")) {
+              const keyAge = Date.now() - Number.parseInt(key.split("-").pop() || "0")
+              if (keyAge > 7 * 24 * 60 * 60 * 1000) {
+                // 7 dias
+                localStorage.removeItem(key)
+              }
+            }
+          })
+        }
+
+        // Tentar salvar no localStorage
+        try {
+          localStorage.setItem(localStorageKey, stateString)
+
+          setLastSavedState(
+            JSON.stringify({
+              elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              backgroundImage: currentState.backgroundImage,
+              backgroundColor: currentState.backgroundColor,
+              placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              canvasSize: currentState.canvasSize,
+            }),
+          )
+
+          console.log("[v0] Autosave local concluído com sucesso")
+          setSaveStatus("saved")
+        } catch (storageError) {
+          console.error("[v0] Erro no localStorage:", storageError)
+
+          if (storageError.name === "QuotaExceededError") {
+            try {
+              // Limpar TUDO exceto o estado atual
+              const currentData = localStorage.getItem(localStorageKey)
+              localStorage.clear()
+              if (currentData) {
+                localStorage.setItem(localStorageKey, currentData)
+              }
+
+              // Tentar salvar novamente
+              localStorage.setItem(localStorageKey, stateString)
+              setLastSavedState(
+                JSON.stringify({
+                  elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+                  backgroundImage: currentState.backgroundImage,
+                  backgroundColor: currentState.backgroundColor,
+                  placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+                  canvasSize: currentState.canvasSize,
+                }),
+              )
+
+              console.log("[v0] Recuperação de quota bem-sucedida")
+              setSaveStatus("saved")
+
+              toast({
+                title: "Espaço Liberado",
+                description: "Dados antigos foram removidos. Suas alterações estão seguras.",
+              })
+            } catch (retryError) {
+              console.error("[v0] Falha na recuperação:", retryError)
+              setSaveStatus("unsaved")
+
+              toast({
+                title: "Aviso de Armazenamento",
+                description: "Espaço local limitado. Salve no banco de dados regularmente.",
+                variant: "destructive",
+              })
+            }
+          } else {
+            setSaveStatus("unsaved")
+            console.error("[v0] Erro inesperado no localStorage:", storageError)
+          }
+        }
+
+        try {
+          onStateChange(currentState, true)
+        } catch (parentError) {
+          console.warn("[v0] Erro ao notificar componente pai:", parentError)
+          // Não falhar o autosave por causa disso
+        }
+      } catch (error) {
+        console.error("[v0] Erro geral no autosave:", error)
+        setSaveStatus("unsaved")
+      }
+    }, debounceTime)
+
+    return () => clearTimeout(handler)
+  }, [elements, backgroundImage, backgroundColor, placeholders, canvasSize, hasRealChanges, saveStatus])
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -1722,95 +1875,88 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       </div>
 
       {/* Sidebar Direita - Configurações do Elemento */}
-      <div className="w-[380px] bg-white border-l flex-shrink-0 flex flex-col min-h-0">
-        <div className="p-4 border-b flex-shrink-0">
+      <div className="w-[320px] bg-white border-l flex-shrink-0 flex flex-col">
+        <div className="p-4 border-b">
           <h2 className="text-lg font-semibold">
             {selectedElement ? "Configurações do Elemento" : "Nenhum Elemento Selecionado"}
           </h2>
           <p className="text-sm text-gray-600">Ajuste as propriedades do elemento selecionado</p>
         </div>
         {selectedElement ? (
-          <ScrollArea className="flex-1 min-h-0">
+          <ScrollArea className="flex-1">
             <div className="p-4 space-y-4">
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Geral</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2">
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Conteúdo</Label>
+                    <Label className="text-xs">Conteúdo</Label>
                     {selectedElementData?.type === "image" ? (
-                      <p className="text-sm text-gray-500 p-2 bg-gray-50 rounded border">Imagem estática</p>
+                      <p className="text-sm text-gray-500">Imagem estática</p>
                     ) : selectedElementData?.type === "qrcode" ? (
-                      <p className="text-sm text-gray-500 p-2 bg-gray-50 rounded border">QR Code</p>
+                      <p className="text-sm text-gray-500">QR Code</p>
                     ) : (
-                      <Textarea
-                        value={selectedElementData?.content || ""}
+                      <Input
+                        type="text"
+                        value={selectedElementData?.content}
                         onChange={(e) => updateSelectedElement({ content: e.target.value })}
-                        className="min-h-[80px] text-sm resize-none"
-                        placeholder="Digite o conteúdo do elemento..."
+                        className="h-8 text-sm"
                       />
                     )}
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-medium">Posição X (px)</Label>
-                      <Input
-                        type="number"
-                        value={selectedElementData?.x || 0}
-                        onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
-                        className="h-10 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-medium">Posição Y (px)</Label>
-                      <Input
-                        type="number"
-                        value={selectedElementData?.y || 0}
-                        onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
-                        className="h-10 text-sm"
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Posição X (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.x}
+                      onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-medium">Largura (px)</Label>
-                      <Input
-                        type="number"
-                        value={selectedElementData?.width || 0}
-                        onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
-                        className="h-10 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-medium">Altura (px)</Label>
-                      <Input
-                        type="number"
-                        value={selectedElementData?.height || 0}
-                        onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
-                        className="h-10 text-sm"
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Posição Y (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.y}
+                      onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Largura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.width}
+                      onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Altura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.height}
+                      onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
                   </div>
                 </CardContent>
               </Card>
-
               {selectedElementData?.type === "text" || selectedElementData?.type === "placeholder" ? (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm">Texto</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="space-y-2">
                     <div className="space-y-2">
-                      <Label className="text-xs font-medium">Fonte</Label>
+                      <Label className="text-xs">Fonte</Label>
                       <Select
                         value={selectedElementData?.fontFamily}
                         onValueChange={(value) => updateSelectedElement({ fontFamily: value })}
                       >
-                        <SelectTrigger className="h-10 text-sm">
-                          <SelectValue placeholder="Selecione uma fonte" />
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Selecione" />
                         </SelectTrigger>
                         <SelectContent>
                           {FONT_FAMILIES.map((font) => (
@@ -1821,46 +1967,42 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                         </SelectContent>
                       </Select>
                     </div>
-
                     <div className="space-y-2">
-                      <Label className="text-xs font-medium">Tamanho da Fonte (px)</Label>
+                      <Label className="text-xs">Tamanho da Fonte (px)</Label>
                       <Input
                         type="number"
-                        value={selectedElementData?.fontSize || 16}
+                        value={selectedElementData?.fontSize}
                         onChange={(e) => updateSelectedElement({ fontSize: Number(e.target.value) })}
-                        className="h-10 text-sm"
+                        className="h-8 text-sm"
                         min="8"
                         max="72"
                       />
                     </div>
-
                     <div className="space-y-2">
-                      <Label className="text-xs font-medium">Cor do Texto</Label>
+                      <Label className="text-xs">Cor do Texto</Label>
                       <div className="flex items-center space-x-2">
                         <Input
                           type="color"
                           value={selectedElementData?.color || "#000000"}
                           onChange={(e) => updateSelectedElement({ color: e.target.value })}
-                          className="w-12 h-10 p-1 border rounded flex-shrink-0"
+                          className="w-12 h-10 p-1 border rounded"
                         />
                         <Input
                           type="text"
                           value={selectedElementData?.color || "#000000"}
                           onChange={(e) => updateSelectedElement({ color: e.target.value })}
-                          className="flex-1 h-10 text-sm font-mono"
+                          className="flex-1 h-10 text-sm"
                           placeholder="#000000"
                         />
                       </div>
                     </div>
-
                     <div className="space-y-2">
-                      <Label className="text-xs font-medium">Alinhamento</Label>
-                      <div className="flex items-center space-x-1">
+                      <Label className="text-xs">Alinhamento</Label>
+                      <div className="flex items-center space-x-2">
                         <Button
                           size="sm"
                           variant={selectedElementData?.textAlign === "left" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "left" })}
-                          className="flex-1"
                         >
                           <AlignLeft className="h-3 w-3" />
                         </Button>
@@ -1868,7 +2010,6 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           size="sm"
                           variant={selectedElementData?.textAlign === "center" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "center" })}
-                          className="flex-1"
                         >
                           <AlignCenter className="h-3 w-3" />
                         </Button>
@@ -1876,7 +2017,6 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           size="sm"
                           variant={selectedElementData?.textAlign === "right" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "right" })}
-                          className="flex-1"
                         >
                           <AlignRight className="h-3 w-3" />
                         </Button>
@@ -1885,62 +2025,53 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                   </CardContent>
                 </Card>
               ) : null}
-
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Aparência</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2">
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Opacidade</Label>
-                    <div className="px-2">
-                      <Slider
-                        value={[selectedElementData?.opacity || 1]}
-                        onChange={(e) => updateSelectedElement({ opacity: Number(e.target.value) })}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        className="w-full"
-                      />
-                      <div className="text-xs text-gray-500 text-center mt-1">
-                        {Math.round((selectedElementData?.opacity || 1) * 100)}%
-                      </div>
-                    </div>
+                    <Label className="text-xs">Opacidade</Label>
+                    <Slider
+                      value={[selectedElementData?.opacity || 1]}
+                      onValueChange={([value]) => updateSelectedElement({ opacity: value })}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
                   </div>
-
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Cor de Fundo</Label>
+                    <Label className="text-xs">Cor de Fundo</Label>
                     <div className="flex items-center space-x-2">
                       <Input
                         type="color"
                         value={selectedElementData?.backgroundColor || "#ffffff"}
                         onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
-                        className="w-12 h-10 p-1 border rounded flex-shrink-0"
+                        className="w-12 h-10 p-1 border rounded"
                       />
                       <Input
                         type="text"
                         value={selectedElementData?.backgroundColor || "#ffffff"}
                         onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
-                        className="flex-1 h-10 text-sm font-mono"
+                        className="flex-1 h-10 text-sm"
                         placeholder="#ffffff"
                       />
                     </div>
                   </div>
-
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Borda</Label>
+                    <Label className="text-xs">Borda</Label>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <Label htmlFor="border-width" className="text-xs font-normal text-gray-500">
-                          Largura (px)
+                          Largura
                         </Label>
                         <Input
                           id="border-width"
                           type="number"
-                          value={selectedElementData?.borderWidth || 0}
+                          value={selectedElementData?.borderWidth}
                           onChange={(e) => updateSelectedElement({ borderWidth: Number(e.target.value) })}
-                          className="h-10 text-sm"
-                          min="0"
+                          className="h-8 text-sm"
+                          placeholder="Largura"
                         />
                       </div>
                       <div>
@@ -1951,20 +2082,18 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           type="color"
                           value={selectedElementData?.borderColor || "#000000"}
                           onChange={(e) => updateSelectedElement({ borderColor: e.target.value })}
-                          className="w-full h-10 p-1 border rounded"
+                          className="w-12 h-10 p-1 border rounded"
                         />
                       </div>
                     </div>
                   </div>
-
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Raio da Borda (px)</Label>
+                    <Label className="text-xs">Raio da Borda</Label>
                     <Input
                       type="number"
-                      value={selectedElementData?.borderRadius || 0}
+                      value={selectedElementData?.borderRadius}
                       onChange={(e) => updateSelectedElement({ borderRadius: Number(e.target.value) })}
-                      className="h-10 text-sm"
-                      min="0"
+                      className="h-8 text-sm"
                     />
                   </div>
                 </CardContent>
@@ -1973,10 +2102,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
           </ScrollArea>
         ) : (
           <div className="flex-1 flex items-center justify-center p-4 text-center text-gray-500">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Nenhum elemento selecionado</div>
-              <div className="text-xs">Clique em um elemento no canvas para editá-lo</div>
-            </div>
+            Selecione um elemento para editar suas propriedades.
           </div>
         )}
       </div>

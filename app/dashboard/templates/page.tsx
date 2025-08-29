@@ -324,83 +324,75 @@ export default function TemplatesPage() {
 
   const handleDuplicate = useCallback(
     async (templateId: string) => {
-      console.log(`[v0] DUPLICATE START: templateId=${templateId}`)
+      console.log(`[v0] DUPLICATE START: template=${templateId}`)
 
-      const original = templates.find((t) => t.id === templateId)
-      if (!original) {
-        console.error(`[v0] DUPLICATE ERROR: Template not found with id ${templateId}`)
-        toast({ title: "Erro: Template não encontrado", variant: "destructive" })
+      if (!user) {
+        console.error("[v0] Duplicate error: No user found")
+        toast({ title: "Erro: usuário não encontrado", variant: "destructive" })
         return
       }
 
-      console.log(`[v0] DUPLICATE: Found original template "${original.title}"`)
-
       try {
-        console.log(`[v0] DUPLICATE: Fetching complete template data...`)
-        const { data: fullTemplate, error: fetchError } = await supabase
+        const { data: originalData, error: fetchError } = await supabase
           .from("certificate_templates")
           .select("*")
           .eq("id", templateId)
+          .eq("user_id", user.id)
           .single()
 
         if (fetchError) {
-          console.error(`[v0] DUPLICATE ERROR: Failed to fetch complete template:`, fetchError)
+          console.error("[v0] Duplicate fetch error:", fetchError)
           throw fetchError
         }
 
-        console.log(
-          `[v0] DUPLICATE: Complete template data fetched, size: ${JSON.stringify(fullTemplate).length} chars`,
-        )
-
-        const { id, created_at, updated_at, public_link_id, ...rest } = fullTemplate
-        const newPublicLinkId = generatePublicLinkId()
-
-        const newTemplate = {
-          ...rest,
-          title: `${fullTemplate.title} (Cópia)`,
-          public_link_id: newPublicLinkId,
-          is_active: false,
+        if (!originalData) {
+          console.error("[v0] Duplicate error: Template not found")
+          toast({ title: "Template não encontrado", variant: "destructive" })
+          return
         }
 
-        console.log(`[v0] DUPLICATE: Prepared new template with public_link_id: ${newPublicLinkId}`)
-        console.log(`[v0] DUPLICATE: New template data size: ${JSON.stringify(newTemplate).length} chars`)
+        console.log(`[v0] DUPLICATE ORIGINAL: ${JSON.stringify(originalData, null, 2)}`)
 
-        const { data, error } = await supabase
-          .from("certificate_templates")
-          .insert(newTemplate)
-          .select("id, title, description, is_active, created_at, public_link_id, folder_id")
-          .single()
+        const { id, created_at, updated_at, public_link_id, ...rest } = originalData
+        const newTemplate = {
+          ...rest,
+          title: `${originalData.title} (Cópia)`,
+          public_link_id: generatePublicLinkId(),
+          is_active: false,
+          user_id: user.id, // Adicionar user_id explicitamente para RLS
+        }
+
+        console.log(`[v0] DUPLICATE NEW TEMPLATE: ${JSON.stringify(newTemplate, null, 2)}`)
+
+        const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
 
         if (error) {
-          console.error(`[v0] DUPLICATE ERROR: Insert failed:`, error)
+          console.error("[v0] Duplicate insert error:", error)
           throw error
         }
 
-        console.log(`[v0] DUPLICATE SUCCESS: New template created with id ${data.id}`)
+        console.log(`[v0] DUPLICATE SUCCESS: ${data.id}`)
 
         const updatedTemplates = [data, ...templates]
         setTemplates(updatedTemplates)
 
         const cacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
-        cache.delete(cacheKey)
-        console.log(`[v0] DUPLICATE: Cache invalidated for key: ${cacheKey}`)
+        setCachedData(cacheKey, updatedTemplates)
 
         toast({
           title: "Template duplicado com sucesso!",
           description: `"${data.title}" foi criado.`,
         })
-      } catch (error) {
-        console.error("[v0] DUPLICATE ERROR: Complete process failed:", error)
-
-        const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+      } catch (error: any) {
+        console.error("[v0] Duplicate error:", error.message || error)
         toast({
           title: "Erro ao duplicar template",
-          description: `Detalhes: ${errorMessage}`,
+          description: error.message || "Tente novamente.",
           variant: "destructive",
         })
       }
     },
-    [templates, currentFolder, toast, supabase],
+    [templates, currentFolder, toast, supabase, user],
   )
 
   const handleCopyLink = useCallback(
@@ -477,7 +469,7 @@ export default function TemplatesPage() {
       const { error: moveError } = await supabase
         .from("certificate_templates")
         .update({ folder_id: null })
-        .eq("folder_id", folderId)
+        .eq("id", folderId)
 
       if (moveError) throw moveError
 
