@@ -42,6 +42,25 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
   const { toast } = useToast()
   const { user } = useAuth()
 
+  const getReturnUrl = useCallback(() => {
+    if (typeof window === "undefined") return "/dashboard/templates"
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const returnToFolder = urlParams.get("returnToFolder")
+
+    if (returnToFolder && template) {
+      // Encontrar a pasta pelo ID para navegar corretamente
+      const folder = folders.find((f) => f.id === returnToFolder)
+      if (folder) {
+        // Usar sessionStorage para manter o estado da pasta atual
+        sessionStorage.setItem("currentFolderId", returnToFolder)
+        sessionStorage.setItem("currentFolderName", folder.name)
+      }
+    }
+
+    return "/dashboard/templates"
+  }, [template, folders])
+
   useEffect(() => {
     if (user && !template) {
       loadTemplate()
@@ -251,7 +270,7 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
         <div className="px-6 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/templates")}>
+              <Button variant="ghost" size="sm" onClick={() => router.push(getReturnUrl())}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Voltar
               </Button>

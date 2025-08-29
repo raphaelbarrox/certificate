@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
@@ -116,6 +116,20 @@ export default function CreateTemplatePage() {
     }
   }
 
+  const getReturnUrl = useCallback(() => {
+    if (typeof window === "undefined") return "/dashboard/templates"
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const fromFolder = urlParams.get("fromFolder")
+
+    if (fromFolder) {
+      // Usar sessionStorage para manter o estado da pasta atual
+      sessionStorage.setItem("currentFolderId", fromFolder)
+    }
+
+    return "/dashboard/templates"
+  }, [])
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -123,7 +137,7 @@ export default function CreateTemplatePage() {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/templates")}>
+              <Button variant="ghost" size="sm" onClick={() => router.push(getReturnUrl())}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Voltar
               </Button>

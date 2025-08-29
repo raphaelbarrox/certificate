@@ -38,6 +38,7 @@ import {
   Loader,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Textarea } from "@/components/ui/textarea"
 
 interface CertificateElement {
   id: string
@@ -1721,88 +1722,95 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       </div>
 
       {/* Sidebar Direita - Configurações do Elemento */}
-      <div className="w-[320px] bg-white border-l flex-shrink-0 flex flex-col">
-        <div className="p-4 border-b">
+      <div className="w-[380px] bg-white border-l flex-shrink-0 flex flex-col min-h-0">
+        <div className="p-4 border-b flex-shrink-0">
           <h2 className="text-lg font-semibold">
             {selectedElement ? "Configurações do Elemento" : "Nenhum Elemento Selecionado"}
           </h2>
           <p className="text-sm text-gray-600">Ajuste as propriedades do elemento selecionado</p>
         </div>
         {selectedElement ? (
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="p-4 space-y-4">
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Geral</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-3">
                   <div className="space-y-2">
-                    <Label className="text-xs">Conteúdo</Label>
+                    <Label className="text-xs font-medium">Conteúdo</Label>
                     {selectedElementData?.type === "image" ? (
-                      <p className="text-sm text-gray-500">Imagem estática</p>
+                      <p className="text-sm text-gray-500 p-2 bg-gray-50 rounded border">Imagem estática</p>
                     ) : selectedElementData?.type === "qrcode" ? (
-                      <p className="text-sm text-gray-500">QR Code</p>
+                      <p className="text-sm text-gray-500 p-2 bg-gray-50 rounded border">QR Code</p>
                     ) : (
-                      <Input
-                        type="text"
-                        value={selectedElementData?.content}
+                      <Textarea
+                        value={selectedElementData?.content || ""}
                         onChange={(e) => updateSelectedElement({ content: e.target.value })}
-                        className="h-8 text-sm"
+                        className="min-h-[80px] text-sm resize-none"
+                        placeholder="Digite o conteúdo do elemento..."
                       />
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Posição X (px)</Label>
-                    <Input
-                      type="number"
-                      value={selectedElementData?.x}
-                      onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
-                      className="h-8 text-sm"
-                    />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">Posição X (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.x || 0}
+                        onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
+                        className="h-10 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">Posição Y (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.y || 0}
+                        onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
+                        className="h-10 text-sm"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Posição Y (px)</Label>
-                    <Input
-                      type="number"
-                      value={selectedElementData?.y}
-                      onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Largura (px)</Label>
-                    <Input
-                      type="number"
-                      value={selectedElementData?.width}
-                      onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Altura (px)</Label>
-                    <Input
-                      type="number"
-                      value={selectedElementData?.height}
-                      onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
-                      className="h-8 text-sm"
-                    />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">Largura (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.width || 0}
+                        onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
+                        className="h-10 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium">Altura (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.height || 0}
+                        onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
+                        className="h-10 text-sm"
+                      />
+                    </div>
                   </div>
                 </CardContent>
               </Card>
+
               {selectedElementData?.type === "text" || selectedElementData?.type === "placeholder" ? (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm">Texto</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2">
+                  <CardContent className="space-y-3">
                     <div className="space-y-2">
-                      <Label className="text-xs">Fonte</Label>
+                      <Label className="text-xs font-medium">Fonte</Label>
                       <Select
                         value={selectedElementData?.fontFamily}
                         onValueChange={(value) => updateSelectedElement({ fontFamily: value })}
                       >
-                        <SelectTrigger className="h-8 text-sm">
-                          <SelectValue placeholder="Selecione" />
+                        <SelectTrigger className="h-10 text-sm">
+                          <SelectValue placeholder="Selecione uma fonte" />
                         </SelectTrigger>
                         <SelectContent>
                           {FONT_FAMILIES.map((font) => (
@@ -1813,42 +1821,46 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                         </SelectContent>
                       </Select>
                     </div>
+
                     <div className="space-y-2">
-                      <Label className="text-xs">Tamanho da Fonte (px)</Label>
+                      <Label className="text-xs font-medium">Tamanho da Fonte (px)</Label>
                       <Input
                         type="number"
-                        value={selectedElementData?.fontSize}
+                        value={selectedElementData?.fontSize || 16}
                         onChange={(e) => updateSelectedElement({ fontSize: Number(e.target.value) })}
-                        className="h-8 text-sm"
+                        className="h-10 text-sm"
                         min="8"
                         max="72"
                       />
                     </div>
+
                     <div className="space-y-2">
-                      <Label className="text-xs">Cor do Texto</Label>
+                      <Label className="text-xs font-medium">Cor do Texto</Label>
                       <div className="flex items-center space-x-2">
                         <Input
                           type="color"
                           value={selectedElementData?.color || "#000000"}
                           onChange={(e) => updateSelectedElement({ color: e.target.value })}
-                          className="w-12 h-10 p-1 border rounded"
+                          className="w-12 h-10 p-1 border rounded flex-shrink-0"
                         />
                         <Input
                           type="text"
                           value={selectedElementData?.color || "#000000"}
                           onChange={(e) => updateSelectedElement({ color: e.target.value })}
-                          className="flex-1 h-10 text-sm"
+                          className="flex-1 h-10 text-sm font-mono"
                           placeholder="#000000"
                         />
                       </div>
                     </div>
+
                     <div className="space-y-2">
-                      <Label className="text-xs">Alinhamento</Label>
-                      <div className="flex items-center space-x-2">
+                      <Label className="text-xs font-medium">Alinhamento</Label>
+                      <div className="flex items-center space-x-1">
                         <Button
                           size="sm"
                           variant={selectedElementData?.textAlign === "left" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "left" })}
+                          className="flex-1"
                         >
                           <AlignLeft className="h-3 w-3" />
                         </Button>
@@ -1856,6 +1868,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           size="sm"
                           variant={selectedElementData?.textAlign === "center" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "center" })}
+                          className="flex-1"
                         >
                           <AlignCenter className="h-3 w-3" />
                         </Button>
@@ -1863,6 +1876,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           size="sm"
                           variant={selectedElementData?.textAlign === "right" ? "default" : "outline"}
                           onClick={() => updateSelectedElement({ textAlign: "right" })}
+                          className="flex-1"
                         >
                           <AlignRight className="h-3 w-3" />
                         </Button>
@@ -1871,53 +1885,62 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                   </CardContent>
                 </Card>
               ) : null}
+
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Aparência</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-3">
                   <div className="space-y-2">
-                    <Label className="text-xs">Opacidade</Label>
-                    <Slider
-                      value={[selectedElementData?.opacity || 1]}
-                      onValueChange={([value]) => updateSelectedElement({ opacity: value })}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                    />
+                    <Label className="text-xs font-medium">Opacidade</Label>
+                    <div className="px-2">
+                      <Slider
+                        value={[selectedElementData?.opacity || 1]}
+                        onChange={(e) => updateSelectedElement({ opacity: Number(e.target.value) })}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        className="w-full"
+                      />
+                      <div className="text-xs text-gray-500 text-center mt-1">
+                        {Math.round((selectedElementData?.opacity || 1) * 100)}%
+                      </div>
+                    </div>
                   </div>
+
                   <div className="space-y-2">
-                    <Label className="text-xs">Cor de Fundo</Label>
+                    <Label className="text-xs font-medium">Cor de Fundo</Label>
                     <div className="flex items-center space-x-2">
                       <Input
                         type="color"
                         value={selectedElementData?.backgroundColor || "#ffffff"}
                         onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
-                        className="w-12 h-10 p-1 border rounded"
+                        className="w-12 h-10 p-1 border rounded flex-shrink-0"
                       />
                       <Input
                         type="text"
                         value={selectedElementData?.backgroundColor || "#ffffff"}
                         onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
-                        className="flex-1 h-10 text-sm"
+                        className="flex-1 h-10 text-sm font-mono"
                         placeholder="#ffffff"
                       />
                     </div>
                   </div>
+
                   <div className="space-y-2">
-                    <Label className="text-xs">Borda</Label>
+                    <Label className="text-xs font-medium">Borda</Label>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <Label htmlFor="border-width" className="text-xs font-normal text-gray-500">
-                          Largura
+                          Largura (px)
                         </Label>
                         <Input
                           id="border-width"
                           type="number"
-                          value={selectedElementData?.borderWidth}
+                          value={selectedElementData?.borderWidth || 0}
                           onChange={(e) => updateSelectedElement({ borderWidth: Number(e.target.value) })}
-                          className="h-8 text-sm"
-                          placeholder="Largura"
+                          className="h-10 text-sm"
+                          min="0"
                         />
                       </div>
                       <div>
@@ -1928,18 +1951,20 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                           type="color"
                           value={selectedElementData?.borderColor || "#000000"}
                           onChange={(e) => updateSelectedElement({ borderColor: e.target.value })}
-                          className="w-12 h-10 p-1 border rounded"
+                          className="w-full h-10 p-1 border rounded"
                         />
                       </div>
                     </div>
                   </div>
+
                   <div className="space-y-2">
-                    <Label className="text-xs">Raio da Borda</Label>
+                    <Label className="text-xs font-medium">Raio da Borda (px)</Label>
                     <Input
                       type="number"
-                      value={selectedElementData?.borderRadius}
+                      value={selectedElementData?.borderRadius || 0}
                       onChange={(e) => updateSelectedElement({ borderRadius: Number(e.target.value) })}
-                      className="h-8 text-sm"
+                      className="h-10 text-sm"
+                      min="0"
                     />
                   </div>
                 </CardContent>
@@ -1948,7 +1973,10 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
           </ScrollArea>
         ) : (
           <div className="flex-1 flex items-center justify-center p-4 text-center text-gray-500">
-            Selecione um elemento para editar suas propriedades.
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Nenhum elemento selecionado</div>
+              <div className="text-xs">Clique em um elemento no canvas para editá-lo</div>
+            </div>
           </div>
         )}
       </div>

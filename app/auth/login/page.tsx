@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useAuth } from "@/components/auth-provider"
+import { createClient } from "@/lib/supabase/client"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -19,7 +19,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
-  const { refreshSession } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,33 +28,26 @@ export default function LoginPage() {
     try {
       console.log("[v0] Tentando fazer login...")
 
-      const response = await fetch("/api/auth/login-redirect", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-        }),
+      const supabase = createClient()
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
       })
 
-      if (response.redirected) {
-        // Se houve redirect, seguir para a nova URL
-        console.log("[v0] Login bem-sucedido, redirecionando...")
-        window.location.href = response.url
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      if (data.user) {
+        console.log("[v0] Login bem-sucedido:", data.user.id)
+        console.log("[v0] Redirecionando para dashboard...")
+
+        window.location.href = "/dashboard"
         return
       }
 
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || "Erro ao fazer login")
-      }
-
-      // Fallback: se não houve redirect, fazer manualmente
-      console.log("[v0] Login bem-sucedido, redirecionando para dashboard...")
-      window.location.href = "/dashboard"
+      throw new Error("Login falhou")
     } catch (error: any) {
       console.error("[v0] Erro no processo de login:", error)
       setError(error.message || "Erro ao fazer login")
