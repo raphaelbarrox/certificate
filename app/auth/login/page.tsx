@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -10,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/components/auth-provider"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -20,6 +19,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
+  const { refreshSession } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -27,17 +27,37 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
+      console.log("[v0] Tentando fazer login...")
+
+      const response = await fetch("/api/auth/login-redirect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
       })
 
-      if (error) throw error
-
-      if (data.user) {
-        router.push("/dashboard")
+      if (response.redirected) {
+        // Se houve redirect, seguir para a nova URL
+        console.log("[v0] Login bem-sucedido, redirecionando...")
+        window.location.href = response.url
+        return
       }
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Erro ao fazer login")
+      }
+
+      // Fallback: se não houve redirect, fazer manualmente
+      console.log("[v0] Login bem-sucedido, redirecionando para dashboard...")
+      window.location.href = "/dashboard"
     } catch (error: any) {
+      console.error("[v0] Erro no processo de login:", error)
       setError(error.message || "Erro ao fazer login")
     } finally {
       setLoading(false)
