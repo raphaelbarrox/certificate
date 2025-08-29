@@ -108,6 +108,7 @@ export default function TemplatesPage() {
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false)
   const [foldersEnabled, setFoldersEnabled] = useState(false)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
 
   const [currentPage, setCurrentPage] = useState(0)
   const [hasMoreTemplates, setHasMoreTemplates] = useState(true)
@@ -326,9 +327,12 @@ export default function TemplatesPage() {
     async (templateId: string) => {
       console.log(`[v0] DUPLICATE START: template=${templateId}`)
 
+      setDuplicatingId(templateId)
+
       if (!user) {
         console.error("[v0] Duplicate error: No user found")
         toast({ title: "Erro: usuário não encontrado", variant: "destructive" })
+        setDuplicatingId(null)
         return
       }
 
@@ -342,16 +346,20 @@ export default function TemplatesPage() {
 
         if (fetchError) {
           console.error("[v0] Duplicate fetch error:", fetchError)
+          if (fetchError.code === "PGRST116") {
+            throw new Error("Template não encontrado ou você não tem permissão para acessá-lo")
+          }
           throw fetchError
         }
 
         if (!originalData) {
           console.error("[v0] Duplicate error: Template not found")
           toast({ title: "Template não encontrado", variant: "destructive" })
+          setDuplicatingId(null)
           return
         }
 
-        console.log(`[v0] DUPLICATE ORIGINAL: ${JSON.stringify(originalData, null, 2)}`)
+        console.log(`[v0] DUPLICATE ORIGINAL: Found template "${originalData.title}"`)
 
         const { id, created_at, updated_at, public_link_id, ...rest } = originalData
         const newTemplate = {
@@ -359,15 +367,24 @@ export default function TemplatesPage() {
           title: `${originalData.title} (Cópia)`,
           public_link_id: generatePublicLinkId(),
           is_active: false,
-          user_id: user.id, // Adicionar user_id explicitamente para RLS
+          user_id: user.id, // Explicitamente definir user_id para RLS
         }
 
-        console.log(`[v0] DUPLICATE NEW TEMPLATE: ${JSON.stringify(newTemplate, null, 2)}`)
+        console.log(`[v0] DUPLICATE NEW TEMPLATE: Creating copy with title "${newTemplate.title}"`)
 
         const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
 
         if (error) {
           console.error("[v0] Duplicate insert error:", error)
+
+          if (error.code === "42501" || error.message.includes("row-level security")) {
+            throw new Error("Sem permissão para criar template. Verifique se está logado corretamente.")
+          } else if (error.code === "23505") {
+            throw new Error("Erro de duplicação: dados conflitantes. Tente novamente.")
+          } else if (error.message.includes("violates not-null constraint")) {
+            throw new Error("Dados obrigatórios em falta. Template original pode estar corrompido.")
+          }
+
           throw error
         }
 
@@ -380,16 +397,36 @@ export default function TemplatesPage() {
         setCachedData(cacheKey, updatedTemplates)
 
         toast({
-          title: "Template duplicado com sucesso!",
-          description: `"${data.title}" foi criado.`,
+          title: "✅ Template duplicado com sucesso!",
+          description: `"${data.title}" foi criado e está pronto para edição.`,
         })
       } catch (error: any) {
         console.error("[v0] Duplicate error:", error.message || error)
+
+        let errorMessage = "Erro ao duplicar template"
+        let errorDescription = "Tente novamente em alguns instantes."
+
+        if (error.message?.includes("permissão") || error.message?.includes("row-level security")) {
+          errorMessage = "Sem Permissão"
+          errorDescription = "Você não tem permissão para duplicar este template. Faça login novamente."
+        } else if (error.message?.includes("não encontrado")) {
+          errorMessage = "Template Não Encontrado"
+          errorDescription = error.message
+        } else if (error.message?.includes("conflitantes")) {
+          errorMessage = "Erro de Duplicação"
+          errorDescription = error.message
+        } else if (error.message?.includes("corrompido")) {
+          errorMessage = "Template Corrompido"
+          errorDescription = error.message
+        }
+
         toast({
-          title: "Erro ao duplicar template",
-          description: error.message || "Tente novamente.",
+          title: errorMessage,
+          description: errorDescription,
           variant: "destructive",
         })
+      } finally {
+        setDuplicatingId(null)
       }
     },
     [templates, currentFolder, toast, supabase, user],
@@ -610,8 +647,12 @@ export default function TemplatesPage() {
                 <DropdownMenuItem onSelect={() => navigateToTemplate(template.id, template.folder_id)}>
                   <Edit className="h-4 w-4 mr-2" /> Editar
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
-                  <Copy className="h-4 w-4 mr-2" /> Duplicar
+                <DropdownMenuItem
+                  onSelect={() => handleDuplicate(template.id)}
+                  disabled={duplicatingId === template.id}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  {duplicatingId === template.id ? "Duplicando..." : "Duplicar"}
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
                   <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
@@ -653,6 +694,7 @@ export default function TemplatesPage() {
                 className="h-7 w-7"
                 title="Duplicar"
                 onClick={() => handleDuplicate(template.id)}
+                disabled={duplicatingId === template.id}
               >
                 <Copy className="h-4 w-4" />
               </Button>
@@ -670,7 +712,7 @@ export default function TemplatesPage() {
         </div>
       </div>
     ),
-    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
+    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate, duplicatingId],
   )
 
   const renderTemplateRow = useCallback(
@@ -705,8 +747,9 @@ export default function TemplatesPage() {
               <DropdownMenuItem onSelect={() => navigateToTemplate(template.id, template.folder_id)}>
                 <Edit className="h-4 w-4 mr-2" /> Editar
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
-                <Copy className="h-4 w-4 mr-2" /> Duplicar
+              <DropdownMenuItem onSelect={() => handleDuplicate(template.id)} disabled={duplicatingId === template.id}>
+                <Copy className="h-4 w-4 mr-2" />
+                {duplicatingId === template.id ? "Duplicando..." : "Duplicar"}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
                 <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
@@ -719,7 +762,7 @@ export default function TemplatesPage() {
         </div>
       </div>
     ),
-    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
+    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate, duplicatingId],
   )
 
   const handleBackToRoot = useCallback(() => {
