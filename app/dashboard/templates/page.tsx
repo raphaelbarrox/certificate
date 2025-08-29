@@ -24,7 +24,7 @@ import {
   FileText,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { createClient } from "@/lib/supabase/client"
+import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import DashboardLayout from "@/components/dashboard-layout"
@@ -77,26 +77,6 @@ function useSessionStorage<T>(key: string, initialValue: T) {
   return [storedValue, setValue] as const
 }
 
-const TEMPLATES_PER_PAGE = 20
-
-const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 2 * 60 * 1000 // 2 minutos
-
-function getCachedData(key: string) {
-  const cached = cache.get(key)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data
-  }
-  if (cached) {
-    cache.delete(key)
-  }
-  return null
-}
-
-function setCachedData(key: string, data: any) {
-  cache.set(key, { data, timestamp: Date.now() })
-}
-
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([])
   const [folders, setFolders] = useState<any[]>([])
@@ -108,328 +88,125 @@ export default function TemplatesPage() {
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false)
   const [foldersEnabled, setFoldersEnabled] = useState(false)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
-  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
-
-  const [currentPage, setCurrentPage] = useState(0)
-  const [hasMoreTemplates, setHasMoreTemplates] = useState(true)
+  const [templatesCache, setTemplatesCache] = useState<Map<string, any[]>>(new Map())
 
   const router = useRouter()
   const { toast } = useToast()
   const { user } = useAuth()
 
-  const supabase = useMemo(() => createClient(), [])
+  const fetchData = useCallback(
+    async (userId: string, forceRefresh = false) => {
+      const cacheKey = currentFolder ? currentFolder.id : "root"
 
-  const loadData = useCallback(
-    async (userId: string, forceRefresh = false, page = 0) => {
-      const folderKey = currentFolder ? currentFolder.id : "root"
-      const templatesKey = `templates-${folderKey}`
-      const foldersKey = "folders"
-
-      console.log(`[v0] LOAD START: folder=${folderKey}, page=${page}, force=${forceRefresh}`)
-
-      // Check cache first
-      if (!forceRefresh && page === 0) {
-        const cachedTemplates = getCachedData(templatesKey)
-        const cachedFolders = !currentFolder ? getCachedData(foldersKey) : null
-
-        if (cachedTemplates) {
-          console.log(`[v0] Using cached templates: ${cachedTemplates.length} items`)
-          setTemplates(cachedTemplates)
-          setHasMoreTemplates(cachedTemplates.length === TEMPLATES_PER_PAGE)
-        }
-
-        if (cachedFolders && !currentFolder) {
-          console.log(`[v0] Using cached folders: ${cachedFolders.length} items`)
-          setFolders(cachedFolders)
-          setFoldersEnabled(cachedFolders.length > 0)
-        }
-
-        if (cachedTemplates && (currentFolder || cachedFolders)) {
-          setLoading(false)
-          return
-        }
+      // Check cache first unless force refresh
+      if (!forceRefresh && templatesCache.has(cacheKey)) {
+        setTemplates(templatesCache.get(cacheKey) || [])
+        setLoading(false)
+        return
       }
 
-      if (page === 0) {
-        setLoading(true)
-      }
-
+      setLoading(true)
       try {
-        const offset = page * TEMPLATES_PER_PAGE
-
-        const promises = []
-
-        // Templates query
-        console.log(`[v0] Fetching templates for folder: ${folderKey}`)
+        // Fetch templates
         const templatesQuery = supabase
           .from("certificate_templates")
-          .select("id, title, description, is_active, created_at, public_link_id, folder_id")
+          .select("*")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
-          .range(offset, offset + TEMPLATES_PER_PAGE - 1)
 
         if (currentFolder) {
           templatesQuery.eq("folder_id", currentFolder.id)
         } else {
-          templatesQuery.is("folder_id", null)
+          // When in root, fetch templates without a folder_id
+          const { error: folderTableError } = await supabase.from("folders").select("id").limit(1)
+          if (!folderTableError) {
+            templatesQuery.is("folder_id", null)
+          }
         }
 
-        promises.push(templatesQuery)
+        const templatesRes = await templatesQuery
+        if (templatesRes.error) throw templatesRes.error
 
-        if (!currentFolder) {
-          console.log(`[v0] Fetching folders - always attempt when not in specific folder`)
+        const fetchedTemplates = templatesRes.data || []
+        setTemplates(fetchedTemplates)
 
-          // Try folders table first
-          const foldersQuery1 = supabase
-            .from("folders")
-            .select("id, name, color")
-            .eq("user_id", userId)
-            .order("name", { ascending: true })
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, fetchedTemplates))
 
-          promises.push(foldersQuery1)
-        }
+        // Fetch folders, but only if not inside a folder view and not already loaded
+        if (!currentFolder && folders.length === 0) {
+          try {
+            const foldersRes = await supabase
+              .from("folders")
+              .select("*")
+              .eq("user_id", userId)
+              .order("name", { ascending: true })
 
-        const results = await Promise.allSettled(promises)
-
-        // Process templates result
-        const templatesResult = results[0]
-        if (templatesResult.status === "fulfilled") {
-          const { data: templatesData, error: templatesError } = templatesResult.value
-
-          if (templatesError) {
-            console.error("[v0] Templates query error:", templatesError)
-            throw templatesError
-          }
-
-          console.log(`[v0] Templates loaded: ${templatesData?.length || 0} items`)
-
-          if (page === 0) {
-            setTemplates(templatesData || [])
-            setCachedData(templatesKey, templatesData || [])
-          } else {
-            const newTemplates = [...templates, ...(templatesData || [])]
-            setTemplates(newTemplates)
-            setCachedData(templatesKey, newTemplates)
-          }
-
-          setHasMoreTemplates((templatesData?.length || 0) === TEMPLATES_PER_PAGE)
-        } else {
-          console.error("[v0] Templates query failed:", templatesResult.reason)
-          throw templatesResult.reason
-        }
-
-        if (!currentFolder && results.length > 1) {
-          const foldersResult = results[1]
-          let foldersData = null
-          let foldersError = null
-
-          if (foldersResult.status === "fulfilled") {
-            foldersData = foldersResult.value.data
-            foldersError = foldersResult.value.error
-          } else {
-            foldersError = foldersResult.reason
-          }
-
-          if (foldersError) {
-            console.log("[v0] Folders table error, trying template_folders:", foldersError)
-            // Fallback to template_folders
-            try {
-              const result = await supabase
-                .from("template_folders")
-                .select("id, name, color")
-                .eq("user_id", userId)
-                .order("name", { ascending: true })
-
-              foldersData = result.data
-              foldersError = result.error
-
-              if (foldersError) {
-                console.error("[v0] template_folders query error:", foldersError)
+            if (foldersRes.error) {
+              if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
+                setFoldersEnabled(false)
+                setFolders([])
               } else {
-                console.log(`[v0] Folders loaded from template_folders: ${foldersData?.length || 0} items`)
+                throw foldersRes.error
               }
-            } catch (fallbackError) {
-              console.error("[v0] Fallback folders query failed:", fallbackError)
-              foldersError = fallbackError
+            } else {
+              setFolders(foldersRes.data || [])
+              setFoldersEnabled(true)
             }
-          } else {
-            console.log(`[v0] Folders loaded from folders table: ${foldersData?.length || 0} items`)
-          }
-
-          if (!foldersError) {
-            setFolders(foldersData || [])
-            setFoldersEnabled((foldersData?.length || 0) > 0)
-            setCachedData(foldersKey, foldersData || [])
-            console.log(
-              `[v0] Final folders state: ${foldersData?.length || 0} folders, enabled: ${(foldersData?.length || 0) > 0}`,
-            )
-          } else {
-            console.error("[v0] All folders queries failed:", foldersError)
-            setFolders([])
+          } catch (folderError) {
+            console.warn("Could not fetch folders:", folderError)
             setFoldersEnabled(false)
-            setCachedData(foldersKey, [])
+            setFolders([])
           }
         }
       } catch (error) {
-        console.error("[v0] Load data error:", error)
+        console.error("Error loading data:", error)
         toast({
           title: "Erro ao carregar dados",
-          description: "Tente recarregar a página.",
+          description: "Verifique se todas as tabelas do banco foram criadas corretamente.",
           variant: "destructive",
         })
       } finally {
         setLoading(false)
-        console.log(`[v0] Load complete: folder=${folderKey}`)
       }
     },
-    [currentFolder, supabase, toast], // Removido templates das dependências
+    [currentFolder, templatesCache, folders.length, toast],
   )
 
   useEffect(() => {
     if (user) {
-      console.log(`[v0] User effect: Loading data for user ${user.id}`)
-      setCurrentPage(0)
-      loadData(user.id)
+      fetchData(user.id)
     }
-  }, [user, currentFolder?.id, loadData])
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedFolderId = sessionStorage.getItem("currentFolderId")
-      const savedFolderName = sessionStorage.getItem("currentFolderName")
-
-      if (savedFolderId && savedFolderName && !currentFolder) {
-        // Restaurar pasta atual após retorno do editor
-        setCurrentFolder({ id: savedFolderId, name: savedFolderName })
-        // Limpar sessionStorage após uso
-        sessionStorage.removeItem("currentFolderId")
-        sessionStorage.removeItem("currentFolderName")
-      }
-    }
-  }, [currentFolder])
-
-  const handleFolderNavigation = useCallback((folder: any) => {
-    console.log(`[v0] Navigating to folder: ${folder.name}`)
-    setCurrentFolder(folder)
-    setCurrentPage(0)
-    setSearchTerm("")
-  }, [])
-
-  const loadMoreTemplates = useCallback(() => {
-    if (user && hasMoreTemplates && !loading) {
-      const nextPage = currentPage + 1
-      setCurrentPage(nextPage)
-      loadData(user.id, false, nextPage)
-    }
-  }, [user, hasMoreTemplates, loading, currentPage, loadData])
+  }, [user, currentFolder, fetchData])
 
   const handleDuplicate = useCallback(
     async (templateId: string) => {
-      console.log(`[v0] DUPLICATE START: template=${templateId}`)
+      const original = templates.find((t) => t.id === templateId)
+      if (!original) return
 
-      setDuplicatingId(templateId)
-
-      if (!user) {
-        console.error("[v0] Duplicate error: No user found")
-        toast({ title: "Erro: usuário não encontrado", variant: "destructive" })
-        setDuplicatingId(null)
-        return
+      const { id, created_at, updated_at, public_link_id, ...rest } = original
+      const newTemplate = {
+        ...rest,
+        title: `${original.title} (Cópia)`,
+        public_link_id: generatePublicLinkId(),
+        is_active: false,
       }
 
       try {
-        const { data: originalData, error: fetchError } = await supabase
-          .from("certificate_templates")
-          .select("*")
-          .eq("id", templateId)
-          .eq("user_id", user.id)
-          .single()
-
-        if (fetchError) {
-          console.error("[v0] Duplicate fetch error:", fetchError)
-          if (fetchError.code === "PGRST116") {
-            throw new Error("Template não encontrado ou você não tem permissão para acessá-lo")
-          }
-          throw fetchError
-        }
-
-        if (!originalData) {
-          console.error("[v0] Duplicate error: Template not found")
-          toast({ title: "Template não encontrado", variant: "destructive" })
-          setDuplicatingId(null)
-          return
-        }
-
-        console.log(`[v0] DUPLICATE ORIGINAL: Found template "${originalData.title}"`)
-
-        const { id, created_at, updated_at, public_link_id, ...rest } = originalData
-        const newTemplate = {
-          ...rest,
-          title: `${originalData.title} (Cópia)`,
-          public_link_id: generatePublicLinkId(),
-          is_active: false,
-          user_id: user.id, // Explicitamente definir user_id para RLS
-        }
-
-        console.log(`[v0] DUPLICATE NEW TEMPLATE: Creating copy with title "${newTemplate.title}"`)
-
         const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
-
-        if (error) {
-          console.error("[v0] Duplicate insert error:", error)
-
-          if (error.code === "42501" || error.message.includes("row-level security")) {
-            throw new Error("Sem permissão para criar template. Verifique se está logado corretamente.")
-          } else if (error.code === "23505") {
-            throw new Error("Erro de duplicação: dados conflitantes. Tente novamente.")
-          } else if (error.message.includes("violates not-null constraint")) {
-            throw new Error("Dados obrigatórios em falta. Template original pode estar corrompido.")
-          }
-
-          throw error
-        }
-
-        console.log(`[v0] DUPLICATE SUCCESS: ${data.id}`)
+        if (error) throw error
 
         const updatedTemplates = [data, ...templates]
         setTemplates(updatedTemplates)
 
-        const cacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
-        setCachedData(cacheKey, updatedTemplates)
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
 
-        toast({
-          title: "✅ Template duplicado com sucesso!",
-          description: `"${data.title}" foi criado e está pronto para edição.`,
-        })
-      } catch (error: any) {
-        console.error("[v0] Duplicate error:", error.message || error)
-
-        let errorMessage = "Erro ao duplicar template"
-        let errorDescription = "Tente novamente em alguns instantes."
-
-        if (error.message?.includes("permissão") || error.message?.includes("row-level security")) {
-          errorMessage = "Sem Permissão"
-          errorDescription = "Você não tem permissão para duplicar este template. Faça login novamente."
-        } else if (error.message?.includes("não encontrado")) {
-          errorMessage = "Template Não Encontrado"
-          errorDescription = error.message
-        } else if (error.message?.includes("conflitantes")) {
-          errorMessage = "Erro de Duplicação"
-          errorDescription = error.message
-        } else if (error.message?.includes("corrompido")) {
-          errorMessage = "Template Corrompido"
-          errorDescription = error.message
-        }
-
-        toast({
-          title: errorMessage,
-          description: errorDescription,
-          variant: "destructive",
-        })
-      } finally {
-        setDuplicatingId(null)
+        toast({ title: "Template duplicado!" })
+      } catch (error) {
+        toast({ title: "Erro ao duplicar", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast, supabase, user],
+    [templates, currentFolder, toast],
   )
 
   const handleCopyLink = useCallback(
@@ -446,10 +223,6 @@ export default function TemplatesPage() {
 
   const toggleTemplateStatus = useCallback(
     async (templateId: string, currentStatus: boolean) => {
-      // Optimistic update
-      const updatedTemplates = templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t))
-      setTemplates(updatedTemplates)
-
       try {
         const { error } = await supabase
           .from("certificate_templates")
@@ -457,18 +230,18 @@ export default function TemplatesPage() {
           .eq("id", templateId)
         if (error) throw error
 
-        const cacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
-        cache.delete(cacheKey)
+        const updatedTemplates = templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t))
+        setTemplates(updatedTemplates)
+
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
 
         toast({ title: "Status atualizado" })
       } catch (error) {
-        console.error("[v0] Toggle status error:", error)
-        // Revert optimistic update on error
-        setTemplates(templates)
         toast({ title: "Erro ao atualizar status", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast, supabase],
+    [templates, currentFolder, toast],
   )
 
   const deleteTemplate = useCallback(
@@ -481,16 +254,15 @@ export default function TemplatesPage() {
         const updatedTemplates = templates.filter((t) => t.id !== templateId)
         setTemplates(updatedTemplates)
 
-        const cacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
-        cache.delete(cacheKey)
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
 
         toast({ title: "Template excluído" })
       } catch (error) {
-        console.error("[v0] Delete template error:", error)
         toast({ title: "Erro ao excluir", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast, supabase],
+    [templates, currentFolder, toast],
   )
 
   const deleteFolder = async (folderId: string) => {
@@ -506,41 +278,19 @@ export default function TemplatesPage() {
       const { error: moveError } = await supabase
         .from("certificate_templates")
         .update({ folder_id: null })
-        .eq("id", folderId)
+        .eq("folder_id", folderId)
 
       if (moveError) throw moveError
 
-      let deleteSuccess = false
+      // Then delete the folder
+      const { error: deleteError } = await supabase.from("folders").delete().eq("id", folderId)
 
-      // Try folders table first
-      const { error: deleteError1 } = await supabase.from("folders").delete().eq("id", folderId)
-      if (!deleteError1) {
-        deleteSuccess = true
-        console.log("[v0] Deleted folder from 'folders' table")
-      } else {
-        console.log("[v0] Failed to delete from 'folders' table, trying template_folders:", deleteError1)
+      if (deleteError) throw deleteError
 
-        // Fallback to template_folders
-        const { error: deleteError2 } = await supabase.from("template_folders").delete().eq("id", folderId)
-        if (!deleteError2) {
-          deleteSuccess = true
-          console.log("[v0] Deleted folder from 'template_folders' table")
-        } else {
-          console.error("[v0] Failed to delete from both tables:", deleteError2)
-          throw deleteError2
-        }
-      }
-
-      if (deleteSuccess) {
-        setFolders(folders.filter((f) => f.id !== folderId))
-
-        cache.delete("folders")
-        cache.delete(`templates-${folderId}`)
-
-        toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
-      }
+      setFolders(folders.filter((f) => f.id !== folderId))
+      setTemplatesCache(new Map())
+      toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
     } catch (error) {
-      console.error("[v0] Error deleting folder:", error)
       toast({ title: "Erro ao excluir pasta", variant: "destructive" })
     }
   }
@@ -564,55 +314,24 @@ export default function TemplatesPage() {
         const updatedTemplates = templates.filter((t) => t.id !== templateId)
         setTemplates(updatedTemplates)
 
-        const currentCacheKey = `templates-${currentFolder ? currentFolder.id : "root"}`
-        const targetCacheKey = `templates-${folderId}`
-        cache.delete(currentCacheKey)
-        cache.delete(targetCacheKey)
+        const cacheKey = currentFolder ? currentFolder.id : "root"
+        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
 
         toast({
           title: "Template movido!",
           description: "O template foi movido para a pasta.",
         })
       } catch (error) {
-        console.error("[v0] Move template error:", error)
         toast({ title: "Erro ao mover template", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast, supabase],
+    [templates, currentFolder, toast],
   )
-
-  const navigateToTemplate = useCallback(
-    (templateId: string, folderId?: string | null) => {
-      const params = new URLSearchParams()
-      if (folderId) {
-        params.set("returnToFolder", folderId)
-      }
-      const url = `/dashboard/templates/edit/${templateId}${params.toString() ? `?${params.toString()}` : ""}`
-      router.push(url)
-    },
-    [router],
-  )
-
-  const createTemplateUrl = useMemo(() => {
-    const params = new URLSearchParams()
-    if (currentFolder) {
-      params.set("fromFolder", currentFolder.id)
-    }
-    return `/dashboard/templates/create${params.toString() ? `?${params.toString()}` : ""}`
-  }, [currentFolder])
 
   const filteredItems = useMemo(() => {
     const lowerSearchTerm = debouncedSearchTerm.toLowerCase()
-
-    if (!lowerSearchTerm) {
-      return { filteredFolders: folders, filteredTemplates: templates }
-    }
-
     const filteredFolders = foldersEnabled ? folders.filter((f) => f.name.toLowerCase().includes(lowerSearchTerm)) : []
-    const filteredTemplates = templates.filter(
-      (t) => t.title.toLowerCase().includes(lowerSearchTerm) || t.description?.toLowerCase().includes(lowerSearchTerm),
-    )
-
+    const filteredTemplates = templates.filter((t) => t.title.toLowerCase().includes(lowerSearchTerm))
     return { filteredFolders, filteredTemplates }
   }, [debouncedSearchTerm, foldersEnabled, folders, templates])
 
@@ -626,14 +345,14 @@ export default function TemplatesPage() {
         draggable="true"
         onDragStart={(e) => e.dataTransfer.setData("templateId", template.id)}
       >
-        <button
-          onClick={() => navigateToTemplate(template.id, template.folder_id)}
+        <Link
+          href={`/dashboard/templates/edit/${template.id}`}
           className="block aspect-video bg-gray-100 rounded-t-lg relative overflow-hidden group"
         >
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
             <FileText className="h-16 w-16 text-blue-400" />
           </div>
-        </button>
+        </Link>
         <div className="p-4 flex-grow flex flex-col">
           <div className="flex justify-between items-start">
             <h3 className="font-semibold truncate flex-1 pr-2">{template.title}</h3>
@@ -644,15 +363,11 @@ export default function TemplatesPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => navigateToTemplate(template.id, template.folder_id)}>
+                <DropdownMenuItem onSelect={() => router.push(`/dashboard/templates/edit/${template.id}`)}>
                   <Edit className="h-4 w-4 mr-2" /> Editar
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => handleDuplicate(template.id)}
-                  disabled={duplicatingId === template.id}
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  {duplicatingId === template.id ? "Duplicando..." : "Duplicar"}
+                <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
+                  <Copy className="h-4 w-4 mr-2" /> Duplicar
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
                   <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
@@ -684,7 +399,7 @@ export default function TemplatesPage() {
                 size="icon"
                 className="h-7 w-7"
                 title="Editar"
-                onClick={() => navigateToTemplate(template.id, template.folder_id)}
+                onClick={() => router.push(`/dashboard/templates/edit/${template.id}`)}
               >
                 <Edit className="h-4 w-4" />
               </Button>
@@ -694,7 +409,6 @@ export default function TemplatesPage() {
                 className="h-7 w-7"
                 title="Duplicar"
                 onClick={() => handleDuplicate(template.id)}
-                disabled={duplicatingId === template.id}
               >
                 <Copy className="h-4 w-4" />
               </Button>
@@ -712,7 +426,7 @@ export default function TemplatesPage() {
         </div>
       </div>
     ),
-    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate, duplicatingId],
+    [router, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
   )
 
   const renderTemplateRow = useCallback(
@@ -744,12 +458,11 @@ export default function TemplatesPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => navigateToTemplate(template.id, template.folder_id)}>
+              <DropdownMenuItem onSelect={() => router.push(`/dashboard/templates/edit/${template.id}`)}>
                 <Edit className="h-4 w-4 mr-2" /> Editar
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => handleDuplicate(template.id)} disabled={duplicatingId === template.id}>
-                <Copy className="h-4 w-4 mr-2" />
-                {duplicatingId === template.id ? "Duplicando..." : "Duplicar"}
+              <DropdownMenuItem onSelect={() => handleDuplicate(template.id)}>
+                <Copy className="h-4 w-4 mr-2" /> Duplicar
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => handleCopyLink(template.public_link_id)}>
                 <LinkIcon className="h-4 w-4 mr-2" /> Copiar Link
@@ -762,42 +475,19 @@ export default function TemplatesPage() {
         </div>
       </div>
     ),
-    [navigateToTemplate, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate, duplicatingId],
+    [router, handleDuplicate, handleCopyLink, toggleTemplateStatus, deleteTemplate],
   )
 
-  const handleBackToRoot = useCallback(() => {
-    setCurrentFolder(null)
-    setCurrentPage(0)
+  const handleFolderNavigation = useCallback((folder: any) => {
+    setCurrentFolder(folder)
+    // Clear search when navigating to folder
     setSearchTerm("")
   }, [])
 
-  const renderFolderSkeleton = () => (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="border rounded-lg bg-white animate-pulse">
-          <div className="flex items-center p-4">
-            <div className="h-5 w-5 bg-gray-200 rounded mr-3"></div>
-            <div className="h-4 bg-gray-200 rounded flex-1"></div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-
-  const renderTemplateSkeleton = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="border rounded-lg bg-white animate-pulse">
-          <div className="aspect-video bg-gray-200 rounded-t-lg"></div>
-          <div className="p-4 space-y-3">
-            <div className="h-4 bg-gray-200 rounded"></div>
-            <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-            <div className="h-8 bg-gray-200 rounded"></div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
+  const handleBackToRoot = useCallback(() => {
+    setCurrentFolder(null)
+    setSearchTerm("")
+  }, [])
 
   return (
     <DashboardLayout>
@@ -807,8 +497,8 @@ export default function TemplatesPage() {
           onOpenChange={setIsFolderDialogOpen}
           onFolderCreated={() => {
             if (user) {
-              cache.delete("folders")
-              loadData(user.id, true)
+              setTemplatesCache(new Map())
+              fetchData(user.id, true)
             }
           }}
         />
@@ -855,7 +545,7 @@ export default function TemplatesPage() {
                 <Plus className="h-4 w-4 mr-2" /> Nova Pasta
               </Button>
             )}
-            <Link href={createTemplateUrl}>
+            <Link href="/dashboard/templates/create">
               <Button>
                 <Plus className="h-4 w-4 mr-2" /> Novo Template
               </Button>
@@ -864,17 +554,9 @@ export default function TemplatesPage() {
         </div>
 
         {loading ? (
-          <div className="space-y-8">
-            {!currentFolder && (
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Pastas</h2>
-                {renderFolderSkeleton()}
-              </div>
-            )}
-            <div>
-              <h2 className="text-xl font-semibold mb-4">Templates</h2>
-              {renderTemplateSkeleton()}
-            </div>
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="text-gray-600 mt-2">Carregando templates...</p>
           </div>
         ) : (
           <>
@@ -892,7 +574,7 @@ export default function TemplatesPage() {
                           setDragOverFolderId(folder.id)
                         }}
                         onDragLeave={() => setDragOverFolderId(null)}
-                        className={`border rounded-lg transition-all relative group hover:shadow-md ${
+                        className={`border rounded-lg transition-all relative group ${
                           dragOverFolderId === folder.id ? "ring-2 ring-blue-500 bg-blue-50" : "bg-white"
                         }`}
                       >
@@ -938,39 +620,29 @@ export default function TemplatesPage() {
                     : "Templates"}
               </h2>
               {filteredTemplates.length > 0 ? (
-                <>
-                  {view === "grid" ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {filteredTemplates.map(renderTemplateCard)}
+                view === "grid" ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredTemplates.map(renderTemplateCard)}
+                  </div>
+                ) : (
+                  <div className="bg-white border rounded-lg">
+                    <div className="flex items-center p-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
+                      <div className="w-16 mr-4"></div>
+                      <div className="flex-grow">Título</div>
+                      <div className="w-32">Criação</div>
+                      <div className="w-24">Status</div>
+                      <div className="w-24 text-right">Ações</div>
                     </div>
-                  ) : (
-                    <div className="bg-white border rounded-lg">
-                      <div className="flex items-center p-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
-                        <div className="w-16 mr-4"></div>
-                        <div className="flex-grow">Título</div>
-                        <div className="w-32">Criação</div>
-                        <div className="w-24">Status</div>
-                        <div className="w-24 text-right">Ações</div>
-                      </div>
-                      {filteredTemplates.map(renderTemplateRow)}
-                    </div>
-                  )}
-
-                  {hasMoreTemplates && !debouncedSearchTerm && (
-                    <div className="text-center mt-6">
-                      <Button variant="outline" onClick={loadMoreTemplates} disabled={loading}>
-                        {loading ? "Carregando..." : "Carregar mais templates"}
-                      </Button>
-                    </div>
-                  )}
-                </>
+                    {filteredTemplates.map(renderTemplateRow)}
+                  </div>
+                )
               ) : (
                 <div className="text-center py-12">
                   <p className="text-sm text-gray-500 mb-4">
                     {debouncedSearchTerm ? "Nenhum template encontrado para sua busca." : "Nenhum template encontrado."}
                   </p>
                   {!debouncedSearchTerm && (
-                    <Link href={createTemplateUrl}>
+                    <Link href="/dashboard/templates/create">
                       <Button>
                         <Plus className="h-4 w-4 mr-2" /> Criar seu primeiro template
                       </Button>

@@ -118,8 +118,8 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
   const [isInitialized, setIsInitialized] = useState(false)
 
   const localStorageKey = `editor-state-${templateId}`
-  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved")
   const [lastSavedState, setLastSavedState] = useState<string>("")
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved")
 
   const canvasRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -192,8 +192,6 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
 
   const hasRealChanges = useCallback(
     (currentState: any) => {
-      if (!lastSavedState) return true // Se não há estado salvo, considera como mudança
-
       const currentStateString = JSON.stringify({
         elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
         backgroundImage: currentState.backgroundImage,
@@ -202,77 +200,157 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
         canvasSize: currentState.canvasSize,
       })
 
-      const hasChanges = currentStateString !== lastSavedState
-      console.log(`[v0] Change detection: ${hasChanges ? "HAS CHANGES" : "NO CHANGES"}`)
-      return hasChanges
+      return currentStateString !== lastSavedState
     },
     [lastSavedState],
   )
 
   useEffect(() => {
-    if (!templateId || elements.length === 0) return
+    if (!isInitialized) return
 
     const currentState = {
-      elements: elements.sort((a, b) => a.id.localeCompare(b.id)),
+      elements: elements.sort((a, b) => a.zIndex - b.zIndex),
       backgroundImage,
       backgroundColor,
-      placeholders: placeholders.sort((a, b) => a.id.localeCompare(b.id)),
+      placeholders,
       canvasSize,
     }
 
-    const currentStateString = JSON.stringify(currentState)
-
-    if (currentStateString !== lastSavedState) {
-      setSaveStatus("unsaved")
-
-      if (onStateChange) {
-        onStateChange(currentState, true)
-      }
+    // Só processa se houver mudanças reais
+    if (!hasRealChanges(currentState)) {
+      return
     }
 
-    const debounceTime = 1500 // 1.5 segundos fixo
-    const handler = setTimeout(async () => {
-      if (saveStatus !== "unsaved") return
+    setSaveStatus("unsaved")
 
+    // Debounce inteligente: 2 segundos para mudanças normais, 5 segundos para mudanças grandes
+    const stateSize = JSON.stringify(currentState).length
+    const debounceTime = stateSize > 100000 ? 5000 : 2000 // 100KB threshold
+
+    const handler = setTimeout(async () => {
       setSaveStatus("saving")
-      console.log("[v0] Starting autosave...")
 
       try {
         const stateString = JSON.stringify(currentState)
-        console.log("[v0] Autosave local:", {
-          size: `${(stateString.length / 1024).toFixed(2)}KB`,
+        const currentSize = new Blob([stateString]).size
+
+        console.log("[v0] Iniciando autosave:", {
+          size: `${(currentSize / 1024).toFixed(2)}KB`,
           elements: elements.length,
+          hasBackground: !!backgroundImage,
         })
 
-        localStorage.setItem(localStorageKey, stateString)
-        setLastSavedState(currentStateString)
-        setSaveStatus("saved")
+        if (currentSize > 3 * 1024 * 1024) {
+          // 3MB limit
+          console.log("[v0] Estado grande detectado, limpando dados antigos")
 
-        console.log("[v0] Autosave local concluído")
+          // Limpar estados antigos de outros templates
+          Object.keys(localStorage).forEach((key) => {
+            if (key.startsWith("editor-state-") && key !== localStorageKey) {
+              localStorage.removeItem(key)
+            }
+          })
+
+          // Limpar outros dados desnecessários
+          Object.keys(localStorage).forEach((key) => {
+            if (key.includes("formData-") || key.includes("formPreviews-")) {
+              const keyAge = Date.now() - Number.parseInt(key.split("-").pop() || "0")
+              if (keyAge > 7 * 24 * 60 * 60 * 1000) {
+                // 7 dias
+                localStorage.removeItem(key)
+              }
+            }
+          })
+        }
+
+        // Tentar salvar no localStorage
+        try {
+          localStorage.setItem(localStorageKey, stateString)
+          setLastSavedState(
+            JSON.stringify({
+              elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              backgroundImage: currentState.backgroundImage,
+              backgroundColor: currentState.backgroundColor,
+              placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              canvasSize: currentState.canvasSize,
+            }),
+          )
+
+          console.log("[v0] Autosave local concluído com sucesso")
+          setSaveStatus("saved")
+        } catch (storageError) {
+          console.error("[v0] Erro no localStorage:", storageError)
+
+          if (storageError.name === "QuotaExceededError") {
+            try {
+              // Limpar TUDO exceto o estado atual
+              const currentData = localStorage.getItem(localStorageKey)
+              localStorage.clear()
+              if (currentData) {
+                localStorage.setItem(localStorageKey, currentData)
+              }
+
+              // Tentar salvar novamente
+              localStorage.setItem(localStorageKey, stateString)
+              setLastSavedState(
+                JSON.stringify({
+                  elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+                  backgroundImage: currentState.backgroundImage,
+                  backgroundColor: currentState.backgroundColor,
+                  placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+                  canvasSize: currentState.canvasSize,
+                }),
+              )
+
+              console.log("[v0] Recuperação de quota bem-sucedida")
+              setSaveStatus("saved")
+
+              toast({
+                title: "Espaço Liberado",
+                description: "Dados antigos foram removidos. Suas alterações estão seguras.",
+              })
+            } catch (retryError) {
+              console.error("[v0] Falha na recuperação:", retryError)
+              setSaveStatus("unsaved")
+
+              toast({
+                title: "Aviso de Armazenamento",
+                description: "Espaço local limitado. Salve no banco de dados regularmente.",
+                variant: "destructive",
+              })
+            }
+          } else {
+            setSaveStatus("unsaved")
+            console.error("[v0] Erro inesperado no localStorage:", storageError)
+          }
+        }
+
+        try {
+          onStateChange(currentState, true)
+        } catch (parentError) {
+          console.warn("[v0] Erro ao notificar componente pai:", parentError)
+          // Não falhar o autosave por causa disso
+        }
       } catch (error) {
-        console.error("[v0] Erro no autosave:", error)
+        console.error("[v0] Erro geral no autosave:", error)
         setSaveStatus("unsaved")
-
-        toast({
-          title: "Aviso de Armazenamento",
-          description: "Erro no salvamento local. Salve manualmente.",
-          variant: "destructive",
-        })
       }
     }, debounceTime)
 
-    return () => clearTimeout(handler)
+    return () => {
+      clearTimeout(handler)
+    }
   }, [
     elements,
     backgroundImage,
     backgroundColor,
     placeholders,
     canvasSize,
-    templateId,
-    saveStatus,
-    lastSavedState,
-    onStateChange,
     localStorageKey,
+    onStateChange,
+    isInitialized,
+    hasRealChanges,
+    lastSavedState,
     toast,
   ])
 

@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -9,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { createClient } from "@/lib/supabase/client"
+import { supabase } from "@/lib/supabase"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -26,30 +27,17 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      console.log("[v0] Tentando fazer login...")
-
-      const supabase = createClient()
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       })
 
-      if (error) {
-        throw new Error(error.message)
-      }
+      if (error) throw error
 
       if (data.user) {
-        console.log("[v0] Login bem-sucedido:", data.user.id)
-        console.log("[v0] Redirecionando para dashboard...")
-
-        window.location.href = "/dashboard"
-        return
+        router.push("/dashboard")
       }
-
-      throw new Error("Login falhou")
     } catch (error: any) {
-      console.error("[v0] Erro no processo de login:", error)
       setError(error.message || "Erro ao fazer login")
     } finally {
       setLoading(false)

@@ -1,22 +1,31 @@
 "use client"
 
 import type React from "react"
+
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { LayoutDashboard, FileText, Award, LogOut, User } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
+import { supabase } from "@/lib/supabase"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user, loading, signOut } = useAuth()
+  const { user, loading } = useAuth()
   const router = useRouter()
 
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/auth/login")
+    }
+  }, [user, loading, router])
+
   const handleLogout = async () => {
-    await signOut()
+    await supabase.auth.signOut()
     router.push("/")
   }
 
