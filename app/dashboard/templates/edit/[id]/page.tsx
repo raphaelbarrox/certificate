@@ -90,14 +90,30 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
   }
 
   const handleEditorStateChange = useCallback((editorData: any, hasChanges: boolean) => {
+    console.log("[v0] Estado do editor alterado:", {
+      hasChanges,
+      elements: editorData.elements?.length || 0,
+      placeholders: editorData.placeholders?.length || 0,
+    })
+
     setTemplate((prev) => {
       if (!prev) return null
+
+      // Evita re-render desnecessário se os dados são idênticos
+      const currentDataString = JSON.stringify(prev.template_data)
+      const newDataString = JSON.stringify(editorData)
+
+      if (currentDataString === newDataString) {
+        return prev
+      }
+
       return {
         ...prev,
         template_data: editorData,
         placeholders: editorData.placeholders || [],
       }
     })
+
     setHasUnsavedChanges(hasChanges)
   }, [])
 
@@ -160,14 +176,15 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
         console.log("[v0] localStorage limpo após salvamento bem-sucedido")
       } catch (storageError) {
         console.warn("[v0] Erro ao limpar localStorage:", storageError)
-        // Não falhar o salvamento por causa disso
       }
+
+      await loadTemplate()
 
       console.log("[v0] Template salvo com sucesso no banco de dados")
 
       toast({
         title: "✅ Salvo com Sucesso!",
-        description: "Todas as alterações foram salvas no banco de dados.",
+        description: "Todas as alterações foram salvas e sincronizadas.",
       })
 
       setHasUnsavedChanges(false)

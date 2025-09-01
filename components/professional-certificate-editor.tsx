@@ -66,8 +66,9 @@ interface CertificateElement {
 }
 
 interface ProfessionalEditorProps {
-  templateId: string
-  onStateChange: (template: any, hasUnsavedChanges: boolean) => void
+  templateId?: string
+  onStateChange?: (template: any, hasUnsavedChanges: boolean) => void
+  onSave?: (template: any) => void
   initialTemplate?: {
     elements?: CertificateElement[]
     backgroundImage?: string
@@ -99,7 +100,12 @@ const FONT_FAMILIES = [
   { label: "ZapfDingbats", value: "zapfdingbats" },
 ]
 
-export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, templateId }: ProfessionalEditorProps) {
+export function ProfessionalCertificateEditor({
+  onStateChange,
+  onSave,
+  initialTemplate,
+  templateId,
+}: ProfessionalEditorProps) {
   const [elements, setElements] = useState<CertificateElement[]>([])
   const [selectedElement, setSelectedElement] = useState<string | null>(null)
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null)
@@ -117,7 +123,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
   const [zoom, setZoom] = useState(0.8)
   const [isInitialized, setIsInitialized] = useState(false)
 
-  const localStorageKey = `editor-state-${templateId}`
+  const localStorageKey = templateId ? `editor-state-${templateId}` : null
   const [lastSavedState, setLastSavedState] = useState<string>("")
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved")
 
@@ -192,17 +198,19 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
 
   const hasRealChanges = useCallback(
     (currentState: any) => {
+      if (!isInitialized) return false
+
       const currentStateString = JSON.stringify({
-        elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-        backgroundImage: currentState.backgroundImage,
-        backgroundColor: currentState.backgroundColor,
-        placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-        canvasSize: currentState.canvasSize,
+        elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)) || [],
+        backgroundImage: currentState.backgroundImage || null,
+        backgroundColor: currentState.backgroundColor || "#ffffff",
+        placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)) || [],
+        canvasSize: currentState.canvasSize || { width: 1200, height: 850 },
       })
 
       return currentStateString !== lastSavedState
     },
-    [lastSavedState],
+    [isInitialized, lastSavedState],
   )
 
   useEffect(() => {
@@ -221,137 +229,79 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       return
     }
 
+    console.log("[v0] Mudança detectada no editor:", {
+      elements: elements.length,
+      hasBackground: !!backgroundImage,
+      placeholders: placeholders.length,
+    })
+
     setSaveStatus("unsaved")
 
-    // Debounce inteligente: 2 segundos para mudanças normais, 5 segundos para mudanças grandes
-    const stateSize = JSON.stringify(currentState).length
-    const debounceTime = stateSize > 100000 ? 5000 : 2000 // 100KB threshold
-
-    const handler = setTimeout(async () => {
-      setSaveStatus("saving")
-
+    // Debounce de 500ms para mudanças normais (reduzido para melhor responsividade)
+    const handler = setTimeout(() => {
       try {
-        const stateString = JSON.stringify(currentState)
-        const currentSize = new Blob([stateString]).size
-
-        console.log("[v0] Iniciando autosave:", {
-          size: `${(currentSize / 1024).toFixed(2)}KB`,
-          elements: elements.length,
-          hasBackground: !!backgroundImage,
-        })
-
-        if (currentSize > 3 * 1024 * 1024) {
-          // 3MB limit
-          console.log("[v0] Estado grande detectado, limpando dados antigos")
-
-          // Limpar estados antigos de outros templates
-          Object.keys(localStorage).forEach((key) => {
-            if (key.startsWith("editor-state-") && key !== localStorageKey) {
-              localStorage.removeItem(key)
-            }
-          })
-
-          // Limpar outros dados desnecessários
-          Object.keys(localStorage).forEach((key) => {
-            if (key.includes("formData-") || key.includes("formPreviews-")) {
-              const keyAge = Date.now() - Number.parseInt(key.split("-").pop() || "0")
-              if (keyAge > 7 * 24 * 60 * 60 * 1000) {
-                // 7 dias
-                localStorage.removeItem(key)
-              }
-            }
-          })
+        // Para modo de criação (sem templateId), apenas notifica o componente pai
+        if (!templateId && onSave) {
+          console.log("[v0] Modo criação: notificando componente pai")
+          onSave(currentState)
+          setSaveStatus("saved")
+          return
         }
 
-        // Tentar salvar no localStorage
-        try {
+        // Para modo de edição, salva no localStorage E notifica imediatamente
+        if (templateId && localStorageKey) {
+          console.log("[v0] Modo edição: salvando no localStorage")
+
+          const stateString = JSON.stringify(currentState)
           localStorage.setItem(localStorageKey, stateString)
+
           setLastSavedState(
             JSON.stringify({
-              elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-              backgroundImage: currentState.backgroundImage,
-              backgroundColor: currentState.backgroundColor,
-              placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-              canvasSize: currentState.canvasSize,
+              elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)) || [],
+              backgroundImage: currentState.backgroundImage || null,
+              backgroundColor: currentState.backgroundColor || "#ffffff",
+              placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)) || [],
+              canvasSize: currentState.canvasSize || { width: 1200, height: 850 },
             }),
           )
 
-          console.log("[v0] Autosave local concluído com sucesso")
-          setSaveStatus("saved")
-        } catch (storageError) {
-          console.error("[v0] Erro no localStorage:", storageError)
-
-          if (storageError.name === "QuotaExceededError") {
-            try {
-              // Limpar TUDO exceto o estado atual
-              const currentData = localStorage.getItem(localStorageKey)
-              localStorage.clear()
-              if (currentData) {
-                localStorage.setItem(localStorageKey, currentData)
-              }
-
-              // Tentar salvar novamente
-              localStorage.setItem(localStorageKey, stateString)
-              setLastSavedState(
-                JSON.stringify({
-                  elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-                  backgroundImage: currentState.backgroundImage,
-                  backgroundColor: currentState.backgroundColor,
-                  placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
-                  canvasSize: currentState.canvasSize,
-                }),
-              )
-
-              console.log("[v0] Recuperação de quota bem-sucedida")
-              setSaveStatus("saved")
-
-              toast({
-                title: "Espaço Liberado",
-                description: "Dados antigos foram removidos. Suas alterações estão seguras.",
-              })
-            } catch (retryError) {
-              console.error("[v0] Falha na recuperação:", retryError)
-              setSaveStatus("unsaved")
-
-              toast({
-                title: "Aviso de Armazenamento",
-                description: "Espaço local limitado. Salve no banco de dados regularmente.",
-                variant: "destructive",
-              })
-            }
-          } else {
-            setSaveStatus("unsaved")
-            console.error("[v0] Erro inesperado no localStorage:", storageError)
-          }
+          console.log("[v0] Autosave local concluído")
         }
 
-        try {
+        if (onStateChange) {
+          console.log("[v0] Estado do editor alterado:", {
+            hasChanges: true,
+            elements: currentState.elements?.length || 0,
+            placeholders: currentState.placeholders?.length || 0,
+          })
           onStateChange(currentState, true)
-        } catch (parentError) {
-          console.warn("[v0] Erro ao notificar componente pai:", parentError)
-          // Não falhar o autosave por causa disso
         }
-      } catch (error) {
-        console.error("[v0] Erro geral no autosave:", error)
-        setSaveStatus("unsaved")
-      }
-    }, debounceTime)
 
-    return () => {
-      clearTimeout(handler)
-    }
+        setSaveStatus("saved")
+      } catch (error) {
+        console.error("[v0] Erro no autosave:", error)
+        setSaveStatus("unsaved")
+
+        // Em caso de erro, ainda notifica o componente pai
+        if (onStateChange) {
+          onStateChange(currentState, true)
+        }
+      }
+    }, 500) // Reduzido de 1000ms para 500ms
+
+    return () => clearTimeout(handler)
   }, [
+    isInitialized,
     elements,
     backgroundImage,
     backgroundColor,
     placeholders,
     canvasSize,
-    localStorageKey,
-    onStateChange,
-    isInitialized,
     hasRealChanges,
-    lastSavedState,
-    toast,
+    templateId,
+    localStorageKey,
+    onSave,
+    onStateChange,
   ])
 
   useEffect(() => {
@@ -363,8 +313,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
     }
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden" && saveStatus === "unsaved") {
-        // Força um save rápido quando a página fica oculta
+      if (document.visibilityState === "hidden" && saveStatus === "unsaved" && templateId && localStorageKey) {
         const currentState = {
           elements: elements.sort((a, b) => a.zIndex - b.zIndex),
           backgroundImage,
@@ -389,7 +338,7 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       window.removeEventListener("beforeunload", handleBeforeUnload)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [saveStatus, elements, backgroundImage, backgroundColor, placeholders, canvasSize, localStorageKey])
+  }, [saveStatus, elements, backgroundImage, backgroundColor, placeholders, canvasSize, templateId, localStorageKey])
 
   // Auto-height calculation for text elements
   useEffect(() => {

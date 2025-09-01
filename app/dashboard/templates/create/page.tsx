@@ -222,6 +222,10 @@ export default function CreateTemplatePage() {
               <ProfessionalCertificateEditor
                 initialTemplate={template.template_data}
                 onSave={(designData) => {
+                  console.log("[v0] Design recebido do editor:", {
+                    elements: designData.elements?.length || 0,
+                    placeholders: designData.placeholders?.length || 0,
+                  })
                   setTemplate({ ...template, template_data: designData })
                   toast({
                     title: "Design salvo localmente!",
