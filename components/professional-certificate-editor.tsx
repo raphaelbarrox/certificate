@@ -4,12 +4,39 @@ import type React from "react"
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Type, ImageIcon, Plus, Upload, Eye, QrCode, Loader } from "lucide-react"
+import {
+  Type,
+  ImageIcon,
+  Trash2,
+  Plus,
+  Upload,
+  Eye,
+  Bold,
+  Italic,
+  Underline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Copy,
+  Layers,
+  Tag,
+  Palette,
+  Move,
+  QrCode,
+  Mail,
+  CalendarDays,
+  Hash,
+  Loader,
+} from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface CertificateElement {
@@ -178,71 +205,6 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
     [lastSavedState],
   )
 
-  const validateState = useCallback((state: any): { isValid: boolean; errors: string[] } => {
-    const errors: string[] = []
-
-    if (!state.elements || !Array.isArray(state.elements)) {
-      errors.push("Elementos inválidos ou ausentes")
-    }
-
-    if (state.elements?.length === 0) {
-      errors.push("Template deve ter pelo menos um elemento")
-    }
-
-    // Validar cada elemento
-    state.elements?.forEach((element: any, index: number) => {
-      if (!element.id || !element.type) {
-        errors.push(`Elemento ${index + 1} tem dados inválidos`)
-      }
-      if (typeof element.x !== "number" || typeof element.y !== "number") {
-        errors.push(`Elemento ${index + 1} tem posição inválida`)
-      }
-      if (element.type === "placeholder" && !element.placeholderId) {
-        errors.push(`Elemento ${index + 1} é um placeholder sem ID`)
-      }
-    })
-
-    if (
-      !state.canvasSize ||
-      typeof state.canvasSize.width !== "number" ||
-      typeof state.canvasSize.height !== "number"
-    ) {
-      errors.push("Tamanho do canvas inválido")
-    }
-
-    return { isValid: errors.length === 0, errors }
-  }, [])
-
-  const createBackup = useCallback(
-    (state: any, reason: string) => {
-      try {
-        const backupKey = `editor-backup-${templateId}-${Date.now()}`
-        const backupData = {
-          state,
-          timestamp: Date.now(),
-          reason,
-          version: "1.0",
-        }
-
-        localStorage.setItem(backupKey, JSON.stringify(backupData))
-
-        // Manter apenas os 3 backups mais recentes
-        const allKeys = Object.keys(localStorage).filter((key) => key.startsWith(`editor-backup-${templateId}-`))
-        if (allKeys.length > 3) {
-          allKeys
-            .sort()
-            .slice(0, -3)
-            .forEach((key) => localStorage.removeItem(key))
-        }
-
-        console.log("[v0] Backup criado:", { reason, key: backupKey })
-      } catch (error) {
-        console.warn("[v0] Falha ao criar backup:", error)
-      }
-    },
-    [templateId],
-  )
-
   useEffect(() => {
     if (!isInitialized) return
 
@@ -254,18 +216,6 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       canvasSize,
     }
 
-    // Validar estado antes de processar
-    const validation = validateState(currentState)
-    if (!validation.isValid) {
-      console.error("[v0] Estado inválido detectado:", validation.errors)
-      toast({
-        title: "Dados Inválidos Detectados",
-        description: "Alguns elementos podem estar corrompidos. Verifique o template.",
-        variant: "destructive",
-      })
-      return
-    }
-
     // Só processa se houver mudanças reais
     if (!hasRealChanges(currentState)) {
       return
@@ -273,103 +223,75 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
 
     setSaveStatus("unsaved")
 
-    // Debounce inteligente baseado no tamanho e complexidade
-    const stateString = JSON.stringify(currentState)
-    const stateSize = stateString.length
-    const complexity = elements.length + (backgroundImage ? 1 : 0) + placeholders.length
-
-    // Algoritmo de debounce adaptativo
-    let debounceTime = 2000 // Base: 2 segundos
-    if (stateSize > 100000) debounceTime = 4000 // Estados grandes: 4 segundos
-    if (complexity > 20) debounceTime += 1000 // Templates complexos: +1 segundo
-    if (stateSize > 500000) debounceTime = 8000 // Estados muito grandes: 8 segundos
+    // Debounce inteligente: 2 segundos para mudanças normais, 5 segundos para mudanças grandes
+    const stateSize = JSON.stringify(currentState).length
+    const debounceTime = stateSize > 100000 ? 5000 : 2000 // 100KB threshold
 
     const handler = setTimeout(async () => {
       setSaveStatus("saving")
 
       try {
+        const stateString = JSON.stringify(currentState)
         const currentSize = new Blob([stateString]).size
 
-        console.log("[v0] Iniciando autosave avançado:", {
+        console.log("[v0] Iniciando autosave:", {
           size: `${(currentSize / 1024).toFixed(2)}KB`,
           elements: elements.length,
-          placeholders: placeholders.length,
-          complexity,
-          debounceUsed: `${debounceTime}ms`,
+          hasBackground: !!backgroundImage,
         })
 
-        // Criar backup antes de mudanças críticas
-        if (currentSize > 1024 * 1024) {
-          // 1MB
-          createBackup(currentState, "large-state-backup")
-        }
-
-        // Gerenciamento inteligente de espaço
         if (currentSize > 3 * 1024 * 1024) {
           // 3MB limit
-          console.log("[v0] Estado crítico detectado, iniciando limpeza inteligente")
+          console.log("[v0] Estado grande detectado, limpando dados antigos")
 
-          // Estratégia de limpeza em camadas
-          const cleanupStrategies = [
-            // Nível 1: Limpar outros templates
-            () => {
-              Object.keys(localStorage).forEach((key) => {
-                if (key.startsWith("editor-state-") && key !== localStorageKey) {
-                  localStorage.removeItem(key)
-                }
-              })
-            },
-            // Nível 2: Limpar dados temporários antigos
-            () => {
-              Object.keys(localStorage).forEach((key) => {
-                if (key.includes("formData-") || key.includes("formPreviews-") || key.includes("temp-")) {
-                  const keyAge = Date.now() - (Number.parseInt(key.split("-").pop() || "0") || 0)
-                  if (keyAge > 24 * 60 * 60 * 1000) {
-                    // 24 horas
-                    localStorage.removeItem(key)
-                  }
-                }
-              })
-            },
-            // Nível 3: Limpar backups antigos
-            () => {
-              Object.keys(localStorage).forEach((key) => {
-                if (key.startsWith("editor-backup-")) {
-                  const keyAge = Date.now() - (Number.parseInt(key.split("-").pop() || "0") || 0)
-                  if (keyAge > 7 * 24 * 60 * 60 * 1000) {
-                    // 7 dias
-                    localStorage.removeItem(key)
-                  }
-                }
-              })
-            },
-          ]
-
-          // Executar estratégias até ter espaço suficiente
-          for (const strategy of cleanupStrategies) {
-            try {
-              strategy()
-              // Testar se agora consegue salvar
-              localStorage.setItem(`test-${Date.now()}`, stateString)
-              localStorage.removeItem(`test-${Date.now()}`)
-              break // Sucesso, parar limpeza
-            } catch (testError) {
-              continue // Tentar próxima estratégia
+          // Limpar estados antigos de outros templates
+          Object.keys(localStorage).forEach((key) => {
+            if (key.startsWith("editor-state-") && key !== localStorageKey) {
+              localStorage.removeItem(key)
             }
-          }
+          })
+
+          // Limpar outros dados desnecessários
+          Object.keys(localStorage).forEach((key) => {
+            if (key.includes("formData-") || key.includes("formPreviews-")) {
+              const keyAge = Date.now() - Number.parseInt(key.split("-").pop() || "0")
+              if (keyAge > 7 * 24 * 60 * 60 * 1000) {
+                // 7 dias
+                localStorage.removeItem(key)
+              }
+            }
+          })
         }
 
-        // Tentar salvar com recuperação automática
-        let saveAttempts = 0
-        const maxAttempts = 3
+        // Tentar salvar no localStorage
+        try {
+          localStorage.setItem(localStorageKey, stateString)
+          setLastSavedState(
+            JSON.stringify({
+              elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              backgroundImage: currentState.backgroundImage,
+              backgroundColor: currentState.backgroundColor,
+              placeholders: currentState.placeholders?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
+              canvasSize: currentState.canvasSize,
+            }),
+          )
 
-        while (saveAttempts < maxAttempts) {
-          try {
-            localStorage.setItem(localStorageKey, stateString)
+          console.log("[v0] Autosave local concluído com sucesso")
+          setSaveStatus("saved")
+        } catch (storageError) {
+          console.error("[v0] Erro no localStorage:", storageError)
 
-            // Verificar integridade do que foi salvo
-            const savedData = localStorage.getItem(localStorageKey)
-            if (savedData && JSON.parse(savedData)) {
+          if (storageError.name === "QuotaExceededError") {
+            try {
+              // Limpar TUDO exceto o estado atual
+              const currentData = localStorage.getItem(localStorageKey)
+              localStorage.clear()
+              if (currentData) {
+                localStorage.setItem(localStorageKey, currentData)
+              }
+
+              // Tentar salvar novamente
+              localStorage.setItem(localStorageKey, stateString)
               setLastSavedState(
                 JSON.stringify({
                   elements: currentState.elements?.sort((a: any, b: any) => a.id.localeCompare(b.id)),
@@ -380,87 +302,31 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
                 }),
               )
 
-              console.log("[v0] Autosave concluído com sucesso na tentativa", saveAttempts + 1)
+              console.log("[v0] Recuperação de quota bem-sucedida")
               setSaveStatus("saved")
-              break
-            } else {
-              throw new Error("Dados salvos estão corrompidos")
+
+              toast({
+                title: "Espaço Liberado",
+                description: "Dados antigos foram removidos. Suas alterações estão seguras.",
+              })
+            } catch (retryError) {
+              console.error("[v0] Falha na recuperação:", retryError)
+              setSaveStatus("unsaved")
+
+              toast({
+                title: "Aviso de Armazenamento",
+                description: "Espaço local limitado. Salve no banco de dados regularmente.",
+                variant: "destructive",
+              })
             }
-          } catch (storageError: any) {
-            saveAttempts++
-            console.error(`[v0] Tentativa ${saveAttempts} falhou:`, storageError)
-
-            if (storageError.name === "QuotaExceededError") {
-              if (saveAttempts === maxAttempts) {
-                // Última tentativa: limpeza drástica
-                try {
-                  const currentData = localStorage.getItem(localStorageKey)
-                  const backups = Object.keys(localStorage)
-                    .filter((key) => key.startsWith(`editor-backup-${templateId}-`))
-                    .map((key) => ({ key, data: localStorage.getItem(key) }))
-
-                  localStorage.clear()
-
-                  // Restaurar apenas dados essenciais
-                  if (currentData) localStorage.setItem(localStorageKey, currentData)
-                  backups.slice(-1).forEach((backup) => {
-                    // Manter apenas 1 backup
-                    if (backup.data) localStorage.setItem(backup.key, backup.data)
-                  })
-
-                  // Tentar salvar novamente
-                  localStorage.setItem(localStorageKey, stateString)
-                  setSaveStatus("saved")
-
-                  toast({
-                    title: "Espaço Crítico Liberado",
-                    description: "Dados antigos foram removidos. Template salvo com sucesso.",
-                  })
-                  break
-                } catch (criticalError) {
-                  console.error("[v0] Falha crítica na recuperação:", criticalError)
-                  setSaveStatus("unsaved")
-
-                  toast({
-                    title: "Erro Crítico de Armazenamento",
-                    description: "Salve no banco de dados IMEDIATAMENTE. Dados podem ser perdidos.",
-                    variant: "destructive",
-                  })
-                  break
-                }
-              } else {
-                // Tentar limpeza incremental
-                const keysToRemove = Object.keys(localStorage)
-                  .filter(
-                    (key) =>
-                      !key.startsWith(`editor-state-${templateId}`) && !key.startsWith(`editor-backup-${templateId}`),
-                  )
-                  .slice(0, 10) // Remover 10 chaves por vez
-
-                keysToRemove.forEach((key) => localStorage.removeItem(key))
-
-                // Aguardar um pouco antes da próxima tentativa
-                await new Promise((resolve) => setTimeout(resolve, 100))
-              }
-            } else {
-              // Outros tipos de erro
-              if (saveAttempts === maxAttempts) {
-                setSaveStatus("unsaved")
-                console.error("[v0] Erro persistente no localStorage:", storageError)
-
-                toast({
-                  title: "Erro de Salvamento Local",
-                  description: "Falha ao salvar localmente. Use 'Salvar' para salvar no banco.",
-                  variant: "destructive",
-                })
-              }
-            }
+          } else {
+            setSaveStatus("unsaved")
+            console.error("[v0] Erro inesperado no localStorage:", storageError)
           }
         }
 
-        // Notificar componente pai sobre mudanças
         try {
-          onStateChange(currentState, saveStatus !== "saved")
+          onStateChange(currentState, true)
         } catch (parentError) {
           console.warn("[v0] Erro ao notificar componente pai:", parentError)
           // Não falhar o autosave por causa disso
@@ -468,48 +334,29 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       } catch (error) {
         console.error("[v0] Erro geral no autosave:", error)
         setSaveStatus("unsaved")
-
-        // Tentar criar backup de emergência
-        createBackup(currentState, "autosave-failure")
-
-        toast({
-          title: "Erro no Salvamento Automático",
-          description: "Backup de emergência criado. Salve manualmente no banco.",
-          variant: "destructive",
-        })
       }
     }, debounceTime)
 
-    return () => clearTimeout(handler)
+    return () => {
+      clearTimeout(handler)
+    }
   }, [
     elements,
     backgroundImage,
     backgroundColor,
     placeholders,
     canvasSize,
-    isInitialized,
     localStorageKey,
-    hasRealChanges,
     onStateChange,
-    validateState,
-    createBackup,
+    isInitialized,
+    hasRealChanges,
+    lastSavedState,
     toast,
   ])
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (saveStatus === "unsaved") {
-        // Criar backup de emergência
-        const emergencyState = {
-          elements: elements.sort((a, b) => a.zIndex - b.zIndex),
-          backgroundImage,
-          backgroundColor,
-          placeholders,
-          canvasSize,
-        }
-
-        createBackup(emergencyState, "before-unload-emergency")
-
         e.preventDefault()
         e.returnValue = "Você tem alterações não salvas. Deseja realmente sair?"
       }
@@ -517,8 +364,8 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden" && saveStatus === "unsaved") {
-        // Save de emergência mais robusto
-        const emergencyState = {
+        // Força um save rápido quando a página fica oculta
+        const currentState = {
           elements: elements.sort((a, b) => a.zIndex - b.zIndex),
           backgroundImage,
           backgroundColor,
@@ -527,75 +374,22 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
         }
 
         try {
-          // Tentar salvar no slot principal
-          localStorage.setItem(localStorageKey, JSON.stringify(emergencyState))
-          console.log("[v0] Save de emergência realizado no slot principal")
+          localStorage.setItem(localStorageKey, JSON.stringify(currentState))
+          console.log("[v0] Save de emergência realizado")
         } catch (error) {
-          try {
-            // Fallback: salvar como backup de emergência
-            createBackup(emergencyState, "visibility-change-emergency")
-            console.log("[v0] Save de emergência realizado como backup")
-          } catch (backupError) {
-            console.error("[v0] Falha completa no save de emergência:", backupError)
-          }
-        }
-      }
-    }
-
-    const handleFocus = () => {
-      if (document.visibilityState === "visible") {
-        // Verificar se há backups mais recentes que o estado atual
-        try {
-          const backupKeys = Object.keys(localStorage)
-            .filter((key) => key.startsWith(`editor-backup-${templateId}-`))
-            .sort()
-
-          if (backupKeys.length > 0) {
-            const latestBackupKey = backupKeys[backupKeys.length - 1]
-            const backupData = JSON.parse(localStorage.getItem(latestBackupKey) || "{}")
-
-            if (backupData.timestamp && backupData.state) {
-              const currentStateTime = Date.now() - 60000 // Considerar estado atual como 1 minuto atrás
-
-              if (backupData.timestamp > currentStateTime && saveStatus === "unsaved") {
-                console.log("[v0] Backup mais recente detectado, oferecendo recuperação")
-
-                // Aqui você poderia mostrar um modal perguntando se quer recuperar
-                // Por enquanto, apenas log
-                toast({
-                  title: "Backup Disponível",
-                  description: "Detectamos um backup mais recente. Verifique se seus dados estão corretos.",
-                })
-              }
-            }
-          }
-        } catch (error) {
-          console.warn("[v0] Erro ao verificar backups:", error)
+          console.error("[v0] Falha no save de emergência:", error)
         }
       }
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload)
     document.addEventListener("visibilitychange", handleVisibilityChange)
-    window.addEventListener("focus", handleFocus)
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
-      window.removeEventListener("focus", handleFocus)
     }
-  }, [
-    saveStatus,
-    elements,
-    backgroundImage,
-    backgroundColor,
-    placeholders,
-    canvasSize,
-    localStorageKey,
-    templateId,
-    createBackup,
-    toast,
-  ])
+  }, [saveStatus, elements, backgroundImage, backgroundColor, placeholders, canvasSize, localStorageKey])
 
   // Auto-height calculation for text elements
   useEffect(() => {
@@ -874,7 +668,54 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       x: 100,
       y: 300,
       width: 300,
-      height: 50,
+      height: 50, // Initial height, will be auto-adjusted
+      fontSize: 18,
+      fontFamily: "helvetica",
+      fontWeight: "normal",
+      fontStyle: "normal",
+      textDecoration: "none",
+      color: "#000000",
+      backgroundColor: "transparent",
+      textAlign: "left",
+      rotation: 0,
+      opacity: 1,
+      borderWidth: 0,
+      borderColor: "#000000",
+      borderRadius: 0,
+      placeholderId,
+      zIndex: elements.length + 1,
+    }
+    setElements((prev) => [...prev, newElement])
+    setSelectedElement(newElement.id)
+  }
+
+  const addDynamicElement = (type: "email" | "issue_date" | "certificate_id") => {
+    let content = ""
+    let placeholderId = ""
+
+    switch (type) {
+      case "email":
+        content = "{{default_email}}"
+        placeholderId = "default_email"
+        break
+      case "issue_date":
+        content = "{{issue_date}}"
+        placeholderId = "issue_date"
+        break
+      case "certificate_id":
+        content = "{{certificate_id}}"
+        placeholderId = "certificate_id"
+        break
+    }
+
+    const newElement: CertificateElement = {
+      id: `placeholder_${Date.now()}`,
+      type: "placeholder",
+      content: content,
+      x: 100,
+      y: 300,
+      width: 300,
+      height: 50, // Initial height, will be auto-adjusted
       fontSize: 18,
       fontFamily: "helvetica",
       fontWeight: "normal",
@@ -893,6 +734,115 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
     }
     setElements((prev) => [...prev, newElement])
     setSelectedElement(newElement.id)
+  }
+
+  const addImageElement = () => {
+    imageInputRef.current?.click()
+  }
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    console.log("[v0] Upload de imagem iniciado:", {
+      name: file.name,
+      type: file.type,
+      size: `${(file.size / 1024).toFixed(2)}KB`,
+    })
+
+    if (!file.type.startsWith("image/")) {
+      console.error("[v0] Tipo de arquivo inválido:", file.type)
+      toast({
+        title: "Erro de Formato",
+        description: `Formato ${file.type} não suportado. Use PNG, JPG, GIF ou WebP.`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      // 10MB limit
+      toast({
+        title: "Arquivo Muito Grande",
+        description: "A imagem deve ter no máximo 10MB. Comprima a imagem e tente novamente.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const reader = new FileReader()
+
+    reader.onload = (event) => {
+      const imageUrl = event.target?.result as string
+      console.log("[v0] Imagem carregada com sucesso:", {
+        dataUrlLength: imageUrl.length,
+        type: file.type,
+      })
+
+      const newElement: CertificateElement = {
+        id: `image_${Date.now()}`,
+        type: "image",
+        content: "",
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 150,
+        fontSize: 16,
+        fontFamily: "Arial",
+        fontWeight: "normal",
+        fontStyle: "normal",
+        textDecoration: "none",
+        color: "#000000",
+        backgroundColor: "transparent",
+        textAlign: "left",
+        rotation: 0,
+        opacity: 1,
+        borderWidth: 0,
+        borderColor: "#000000",
+        borderRadius: 0,
+        imageUrl,
+        zIndex: elements.length + 1,
+      }
+      setElements((prev) => [...prev, newElement])
+      setSelectedElement(newElement.id)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const updateSelectedElement = (updates: Partial<CertificateElement>) => {
+    if (!selectedElement) return
+    setElements((prev) => prev.map((el) => (el.id === selectedElement ? { ...el, ...updates } : el)))
+  }
+
+  const deleteSelectedElement = () => {
+    if (!selectedElement) return
+    setElements((prev) => prev.filter((el) => el.id !== selectedElement))
+    setSelectedElement(null)
+  }
+
+  const duplicateSelectedElement = () => {
+    if (!selectedElement) return
+    const element = elements.find((el) => el.id === selectedElement)
+    if (!element) return
+    const newElement = {
+      ...element,
+      id: `${element.type}_${Date.now()}`,
+      x: element.x + 20,
+      y: element.y + 20,
+      zIndex: elements.length + 1,
+    }
+    setElements((prev) => [...prev, newElement])
+    setSelectedElement(newElement.id)
+  }
+
+  const moveElementLayer = (direction: "up" | "down") => {
+    if (!selectedElement) return
+    setElements((prev) => {
+      const element = prev.find((el) => el.id === selectedElement)
+      if (!element) return prev
+      const newZIndex = direction === "up" ? element.zIndex + 1 : Math.max(1, element.zIndex - 1)
+      return prev.map((el) => (el.id === selectedElement ? { ...el, zIndex: newZIndex } : el))
+    })
   }
 
   const addNewPlaceholder = () => {
@@ -976,83 +926,98 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
       opacity: element.opacity,
       border: element.borderWidth > 0 ? `${element.borderWidth}px solid ${element.borderColor}` : "none",
       borderRadius: element.borderRadius,
-      cursor: isPreview ? "default" : "move",
       zIndex: element.zIndex,
-      display: "flex",
-      alignItems: "center",
-      justifyContent:
-        element.textAlign === "center" ? "center" : element.textAlign === "right" ? "flex-end" : "flex-start",
-      padding: "4px",
+      cursor: isPreview ? "default" : "move",
+      userSelect: "none",
       boxSizing: "border-box",
-      wordWrap: "break-word",
       overflow: "hidden",
+      wordWrap: "break-word",
+      whiteSpace: isTextElement ? "pre-wrap" : "normal",
     }
 
-    if (element.type === "qrcode") {
+    if (element.type === "qrcode" && !isPreview) {
       return (
         <div
           key={element.id}
-          style={elementStyle}
-          onMouseDown={(e) => !isPreview && handleMouseDown(e, element.id)}
-          className={`${isSelected ? "ring-2 ring-blue-500" : ""} ${isPreview ? "" : "hover:ring-1 hover:ring-gray-300"}`}
+          className={`absolute cursor-move select-none flex items-center justify-center flex-col p-2 ${
+            isSelected ? "ring-2 ring-blue-500 ring-offset-2" : ""
+          } hover:ring-1 hover:ring-gray-300 bg-gray-50`}
+          style={{ ...elementStyle, borderStyle: "dashed", borderColor: "#6b7280" }}
+          onMouseDown={(e) => handleMouseDown(e, element.id)}
+          onClick={(e) => {
+            e.stopPropagation()
+            setSelectedElement(element.id)
+          }}
         >
-          <div className="w-full h-full bg-gray-200 border-2 border-dashed border-gray-400 flex items-center justify-center text-xs text-gray-600">
-            QR Code
-          </div>
-          {isSelected && !isPreview && (
+          <QrCode className="w-1/2 h-1/2 text-gray-500" />
+          <span className="text-xs text-center mt-2 text-gray-600">QR Code</span>
+          {isSelected && (
             <>
               <div
-                className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
+                className="absolute -bottom-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-se-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
               />
               <div
-                className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 cursor-ne-resize"
+                className="absolute -top-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-ne-resize rounded-full shadow-md"
                 onMouseDown={(e) => handleMouseDown(e, element.id, "ne")}
               />
               <div
-                className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500 cursor-sw-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
+                className="absolute -top-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-nw-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
               />
               <div
-                className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500 cursor-se-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
+                className="absolute -bottom-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-sw-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
               />
+              <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-2 py-1 rounded text-xs cursor-move flex items-center gap-1">
+                <Move className="w-3 h-3" />
+                Mover
+              </div>
             </>
           )}
         </div>
       )
     }
 
-    if (element.type === "image-placeholder") {
+    if (element.type === "image-placeholder" && !isPreview) {
       return (
         <div
           key={element.id}
-          style={elementStyle}
-          onMouseDown={(e) => !isPreview && handleMouseDown(e, element.id)}
-          className={`${isSelected ? "ring-2 ring-blue-500" : ""} ${isPreview ? "" : "hover:ring-1 hover:ring-gray-300"}`}
+          className={`absolute cursor-move select-none flex items-center justify-center flex-col p-2 ${
+            isSelected ? "ring-2 ring-blue-500 ring-offset-2" : ""
+          } hover:ring-1 hover:ring-gray-300`}
+          style={{ ...elementStyle, borderStyle: "dashed" }}
+          onMouseDown={(e) => handleMouseDown(e, element.id)}
+          onClick={(e) => {
+            e.stopPropagation()
+            setSelectedElement(element.id)
+          }}
         >
-          <div className="w-full h-full flex flex-col items-center justify-center text-center">
-            <ImageIcon className="w-8 h-8 text-gray-400 mb-2" />
-            <span className="text-xs text-gray-600">{displayContent}</span>
-          </div>
-          {isSelected && !isPreview && (
+          <ImageIcon className="w-1/3 h-1/3 text-gray-400" />
+          <span className="text-xs text-center mt-2 text-gray-500">{element.content}</span>
+          <Badge className="absolute top-2 right-2 text-xs bg-gray-200 text-gray-700">Imagem 3x4</Badge>
+          {isSelected && (
             <>
               <div
-                className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
+                className="absolute -bottom-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-se-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
               />
               <div
-                className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 cursor-ne-resize"
+                className="absolute -top-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-ne-resize rounded-full shadow-md"
                 onMouseDown={(e) => handleMouseDown(e, element.id, "ne")}
               />
               <div
-                className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500 cursor-sw-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
+                className="absolute -top-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-nw-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
               />
               <div
-                className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500 cursor-se-resize"
-                onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
+                className="absolute -bottom-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-sw-resize rounded-full shadow-md"
+                onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
               />
+              <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-2 py-1 rounded text-xs cursor-move flex items-center gap-1">
+                <Move className="w-3 h-3" />
+                Mover
+              </div>
             </>
           )}
         </div>
@@ -1062,53 +1027,147 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
     return (
       <div
         key={element.id}
+        className={`${isSelected ? "ring-2 ring-blue-500" : ""} ${isPreview ? "" : "hover:ring-1 hover:ring-gray-300"}`}
         style={elementStyle}
-        onMouseDown={(e) => !isPreview && handleMouseDown(e, element.id)}
-        className={`${isSelected ? "ring-2 ring-blue-500" : ""} ${isPreview ? "" : "hover:ring-1 hover:ring-gray-300"} leading-tight whitespace-pre-wrap`}
-        contentEditable={!isPreview && isSelected}
-        suppressContentEditableWarning={true}
-        onBlur={(e) => {
-          if (!isPreview && isSelected) {
-            const newContent = e.currentTarget.textContent || ""
-            setElements((prev) => prev.map((el) => (el.id === element.id ? { ...el, content: newContent } : el)))
-          }
-        }}
+        onMouseDown={isPreview ? undefined : (e) => handleMouseDown(e, element.id)}
+        onClick={
+          isPreview
+            ? undefined
+            : (e) => {
+                e.stopPropagation()
+                setSelectedElement(element.id)
+              }
+        }
       >
-        {displayContent}
-        {isSelected && !isPreview && isTextElement && (
-          <>
-            <div
-              className="absolute top-1/2 -left-1 w-2 h-4 bg-blue-500 cursor-w-resize -translate-y-1/2"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "w")}
-            />
-            <div
-              className="absolute top-1/2 -right-1 w-2 h-4 bg-blue-500 cursor-e-resize -translate-y-1/2"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "e")}
-            />
-          </>
+        {element.type === "image" && element.imageUrl ? (
+          <img
+            src={element.imageUrl || "/placeholder.svg"}
+            alt="Element"
+            className="w-full h-full object-cover"
+            style={{ borderRadius: element.borderRadius }}
+            draggable={false}
+          />
+        ) : (
+          <div
+            className="w-full h-full leading-tight"
+            onDoubleClick={
+              isPreview
+                ? undefined
+                : (e) => {
+                    e.stopPropagation()
+                    const newContent = prompt("Editar texto:", element.content)
+                    if (newContent !== null) {
+                      setElements((prev) =>
+                        prev.map((el) => (el.id === element.id ? { ...el, content: newContent } : el)),
+                      )
+                    }
+                  }
+            }
+            style={{ cursor: isPreview ? "default" : "text" }}
+          >
+            {displayContent}
+          </div>
         )}
-        {isSelected && !isPreview && !isTextElement && (
+        {element.type === "placeholder" && !isPreview && (
+          <Badge className="absolute -top-8 left-0 text-xs bg-blue-100 text-blue-800 pointer-events-none">
+            {placeholders.find((p) => p.id === element.placeholderId)?.label || element.content}
+          </Badge>
+        )}
+        {isSelected && !isPreview && (
           <>
-            <div
-              className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
-            />
-            <div
-              className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 cursor-ne-resize"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "ne")}
-            />
-            <div
-              className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500 cursor-sw-resize"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
-            />
-            <div
-              className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500 cursor-se-resize"
-              onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
-            />
+            {isTextElement ? (
+              <>
+                <div
+                  className="absolute top-1/2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-e-resize rounded-full shadow-md -translate-y-1/2"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "e")}
+                />
+                <div
+                  className="absolute top-1/2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-w-resize rounded-full shadow-md -translate-y-1/2"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "w")}
+                />
+              </>
+            ) : (
+              <>
+                <div
+                  className="absolute -bottom-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-se-resize rounded-full shadow-md"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "se")}
+                />
+                <div
+                  className="absolute -top-2 -right-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-ne-resize rounded-full shadow-md"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "ne")}
+                />
+                <div
+                  className="absolute -top-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-nw-resize rounded-full shadow-md"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "nw")}
+                />
+                <div
+                  className="absolute -bottom-2 -left-2 w-4 h-4 bg-blue-500 border-2 border-white cursor-sw-resize rounded-full shadow-md"
+                  onMouseDown={(e) => handleMouseDown(e, element.id, "sw")}
+                />
+              </>
+            )}
+            <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-2 py-1 rounded text-xs cursor-move flex items-center gap-1">
+              <Move className="w-3 h-3" />
+              Mover
+            </div>
           </>
         )}
       </div>
     )
+  }
+
+  const selectedElementData = elements.find((el) => el.id === selectedElement)
+
+  const addImagePlaceholder = () => {
+    if (!newImagePlaceholder.id || !newImagePlaceholder.label) {
+      toast({
+        title: "Erro",
+        description: "Preencha o ID e o rótulo do placeholder de imagem.",
+        variant: "destructive",
+      })
+      return
+    }
+    const placeholderId = newImagePlaceholder.id.toLowerCase().replace(/\s/g, "_")
+    if (placeholders.some((p) => p.id === placeholderId)) {
+      toast({
+        title: "Erro",
+        description: "Já existe um placeholder com este ID.",
+        variant: "destructive",
+      })
+      return
+    }
+    setPlaceholders((prev) => [...prev, { ...newImagePlaceholder, id: placeholderId, type: "image" }])
+    const newElement: CertificateElement = {
+      id: `img_placeholder_${Date.now()}`,
+      type: "image-placeholder",
+      content: newImagePlaceholder.label,
+      x: 150,
+      y: 150,
+      width: 150,
+      height: 200,
+      fontSize: 16,
+      fontFamily: "Arial",
+      fontWeight: "normal",
+      fontStyle: "normal",
+      textDecoration: "none",
+      color: "#9ca3af",
+      backgroundColor: "#f3f4f6",
+      textAlign: "center",
+      rotation: 0,
+      opacity: 1,
+      borderWidth: 2,
+      borderColor: "#d1d5db",
+      borderRadius: 8,
+      placeholderId: placeholderId,
+      zIndex: elements.length + 1,
+    }
+    setElements((prev) => [...prev, newElement])
+    setSelectedElement(newElement.id)
+    setNewImagePlaceholder({ id: "", label: "" })
+    toast({
+      title: "Placeholder de Imagem Adicionado!",
+      description: `Use a tag {{${placeholderId}}} no formulário.`,
+    })
   }
 
   if (!isInitialized) {
@@ -1120,291 +1179,779 @@ export function ProfessionalCertificateEditor({ onStateChange, initialTemplate, 
   }
 
   return (
-    <div className="flex h-full bg-gray-50">
-      {/* Left Sidebar */}
-      <div className="w-[400px] bg-white border-r flex flex-col">
+    <div className="flex h-full bg-gray-50 overflow-hidden relative">
+      {/* Sidebar Esquerda - Ferramentas */}
+      <div className="w-[400px] bg-white border-r flex flex-col flex-shrink-0">
         <div className="p-4 border-b">
-          <h2 className="text-lg font-semibold mb-4">Editor Profissional</h2>
-          <div className="text-sm text-gray-600 mb-2">Crie certificados incríveis com elementos personalizados</div>
-          <div className="flex items-center space-x-2 text-xs text-gray-500">
-            <Badge variant="outline" className="text-xs">
-              {saveStatus === "saved" ? "✓ Salvo" : saveStatus === "saving" ? "Salvando..." : "⚠ Não salvo"}
-            </Badge>
-            <span>•</span>
-            <span>{elements.length} elementos</span>
-          </div>
+          <h2 className="text-lg font-semibold">Editor Profissional</h2>
+          <p className="text-sm text-gray-600">Crie certificados incríveis</p>
         </div>
-
         <ScrollArea className="flex-1">
-          <div className="p-4 space-y-6">
-            {/* Add Elements Section */}
-            <div>
-              <h3 className="font-medium mb-3">Adicionar Elementos</h3>
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={addTextElement}
-                  className="w-full justify-start bg-transparent"
-                >
-                  <Type className="h-4 w-4 mr-2" />
-                  Texto
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full justify-start"
-                >
-                  <ImageIcon className="h-4 w-4 mr-2" />
-                  Imagem (Estática)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={addQrCodeElement}
-                  className="w-full justify-start bg-transparent"
-                >
-                  <QrCode className="h-4 w-4 mr-2" />
-                  QR Code (Link de Verificação)
-                </Button>
-              </div>
-            </div>
-
-            {/* TAGs Section */}
-            <div>
-              <h3 className="font-medium mb-3">TAGs</h3>
-              <div className="space-y-2">
-                <Input
-                  placeholder="ID da Tag (ex: student_name)"
-                  value={newPlaceholder.id}
-                  onChange={(e) => setNewPlaceholder({ ...newPlaceholder, id: e.target.value })}
-                />
-                <Input
-                  placeholder="Rótulo da Tag (ex: Nome do Aluno)"
-                  value={newPlaceholder.label}
-                  onChange={(e) => setNewPlaceholder({ ...newPlaceholder, label: e.target.value })}
-                />
-                <Button onClick={addNewPlaceholder} size="sm" className="w-full">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Adicionar TAG
-                </Button>
-              </div>
-
-              {placeholders.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <Label className="text-sm font-medium">TAGs Disponíveis:</Label>
-                  {placeholders.map((placeholder) => (
-                    <div key={placeholder.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <div className="flex-1">
-                        <div className="font-mono text-xs text-blue-600">{"{{" + placeholder.id + "}}"}</div>
-                        <div className="text-xs text-gray-600">{placeholder.label}</div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => addPlaceholderElement(placeholder.id)}
-                        className="text-xs"
-                      >
-                        Usar
+          <div className="p-4">
+            <Tabs defaultValue="elements" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="elements" className="text-xs">
+                  <Plus className="h-3 w-3" />
+                </TabsTrigger>
+                <TabsTrigger value="design" className="text-xs">
+                  <Palette className="h-3 w-3" />
+                </TabsTrigger>
+                <TabsTrigger value="layers" className="text-xs">
+                  <Layers className="h-3 w-3" />
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="elements" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Adicionar Elementos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <Button
+                      onClick={addTextElement}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <Type className="h-4 w-4 mr-2" />
+                      Texto
+                    </Button>
+                    <Button
+                      onClick={addImageElement}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <ImageIcon className="h-4 w-4 mr-2" />
+                      Imagem (Estática)
+                    </Button>
+                    <Button
+                      onClick={addQrCodeElement}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <QrCode className="h-4 w-4 mr-2" />
+                      QR Code (Link de Verificação)
+                    </Button>
+                    <Button
+                      onClick={() => addDynamicElement("email")}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <Mail className="h-4 w-4 mr-2" />
+                      Email (Dinâmico)
+                    </Button>
+                    <Button
+                      onClick={() => addDynamicElement("issue_date")}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <CalendarDays className="h-4 w-4 mr-2" />
+                      Data de Emissão (Dinâmico)
+                    </Button>
+                    <Button
+                      onClick={() => addDynamicElement("certificate_id")}
+                      variant="outline"
+                      className="w-full justify-start text-sm bg-transparent hover:bg-blue-50"
+                    >
+                      <Hash className="h-4 w-4 mr-2" />
+                      ID do Certificado (Dinâmico)
+                    </Button>
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                    />
+                    <Separator className="my-3" />
+                    <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                      <Label className="text-sm font-medium text-gray-600">Imagem do Usuário (3x4)</Label>
+                      <Input
+                        placeholder="ID da Imagem (ex: foto_aluno)"
+                        value={newImagePlaceholder.id}
+                        onChange={(e) => setNewImagePlaceholder((prev) => ({ ...prev, id: e.target.value }))}
+                        className="h-8 text-xs font-mono"
+                      />
+                      <Input
+                        placeholder="Rótulo (ex: Foto 3x4)"
+                        value={newImagePlaceholder.label}
+                        onChange={(e) => setNewImagePlaceholder((prev) => ({ ...prev, label: e.target.value }))}
+                        className="h-8 text-xs"
+                      />
+                      <Button onClick={addImagePlaceholder} size="sm" className="w-full text-xs">
+                        <Plus className="h-3 w-3 mr-2" />
+                        Adicionar Placeholder de Imagem
                       </Button>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Background Section */}
-            <div>
-              <h3 className="font-medium mb-3">Fundo do Certificado</h3>
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm">Cor de Fundo</Label>
-                  <Input
-                    type="color"
-                    value={backgroundColor}
-                    onChange={(e) => setBackgroundColor(e.target.value)}
-                    className="w-full h-10"
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">Imagem de Fundo</Label>
-                  <Button variant="outline" onClick={() => imageInputRef.current?.click()} className="w-full">
-                    <Upload className="h-4 w-4 mr-2" />
-                    {backgroundImage ? "Alterar Imagem" : "Adicionar Imagem"}
-                  </Button>
-                  {backgroundImage && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setBackgroundImage(null)}
-                      className="w-full mt-1 text-red-600"
-                    >
-                      Remover Imagem
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Canvas Settings */}
-            <div>
-              <h3 className="font-medium mb-3">Configurações do Canvas</h3>
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm">Largura (px)</Label>
-                  <Input
-                    type="number"
-                    value={canvasSize.width}
-                    onChange={(e) => setCanvasSize({ ...canvasSize, width: Number.parseInt(e.target.value) || 1200 })}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">Altura (px)</Label>
-                  <Input
-                    type="number"
-                    value={canvasSize.height}
-                    onChange={(e) => setCanvasSize({ ...canvasSize, height: Number.parseInt(e.target.value) || 850 })}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">Zoom: {Math.round(zoom * 100)}%</Label>
-                  <Slider
-                    value={[zoom]}
-                    onValueChange={([value]) => setZoom(value)}
-                    min={0.1}
-                    max={2}
-                    step={0.1}
-                    className="mt-2"
-                  />
-                </div>
-              </div>
-            </div>
+                    <Separator className="my-3" />
+                    <div className="space-y-4">
+                      <Label className="text-sm font-medium text-gray-600">TAGs</Label>
+                      <div className="p-3 border rounded-lg bg-gray-50 space-y-2">
+                        <Input
+                          placeholder="ID da Tag (ex: student_name)"
+                          value={newPlaceholder.id}
+                          onChange={(e) =>
+                            setNewPlaceholder((prev) => ({
+                              ...prev,
+                              id: e.target.value.toLowerCase().replace(/\s/g, "_"),
+                            }))
+                          }
+                          className="h-8 text-xs font-mono"
+                        />
+                        <Input
+                          placeholder="Rótulo da Tag (ex: Nome do Aluno)"
+                          value={newPlaceholder.label}
+                          onChange={(e) => setNewPlaceholder((prev) => ({ ...prev, label: e.target.value }))}
+                          className="h-8 text-xs"
+                        />
+                        <Button onClick={addNewPlaceholder} size="sm" className="w-full text-xs">
+                          <Plus className="h-3 w-3 mr-2" />
+                          Criar Nova Tag
+                        </Button>
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {placeholders.length > 0 ? (
+                          placeholders
+                            .filter((p) => p.type !== "image")
+                            .map((placeholder) => (
+                              <div
+                                key={placeholder.id}
+                                className="flex items-center justify-between p-2 border rounded-md hover:bg-gray-100 transition-colors"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{placeholder.label}</p>
+                                  <p className="text-xs text-gray-500 font-mono truncate">
+                                    {"{{"}
+                                    {placeholder.id}
+                                    {"}}"}
+                                  </p>
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => addPlaceholderElement(placeholder.id)}
+                                    className="h-7 w-7 p-0"
+                                    title="Adicionar ao certificado"
+                                  >
+                                    <Plus className="h-4 w-4 text-green-600" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      if (confirm(`Excluir tag "${placeholder.label}"?`)) {
+                                        setPlaceholders((prev) => prev.filter((p) => p.id !== placeholder.id))
+                                      }
+                                    }}
+                                    className="h-7 w-7 p-0"
+                                    title="Excluir tag"
+                                  >
+                                    <Trash2 className="h-3 w-3 text-red-500" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))
+                        ) : (
+                          <p className="text-xs text-center text-gray-500 py-4">Nenhuma tag criada ainda.</p>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="design" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Fundo do Certificado</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Cor de Fundo</Label>
+                      <div className="flex items-center space-x-2">
+                        <Input
+                          type="color"
+                          value={backgroundColor}
+                          onChange={(e) => setBackgroundColor(e.target.value)}
+                          className="w-12 h-10 p-1 border rounded"
+                        />
+                        <Input
+                          type="text"
+                          value={backgroundColor}
+                          onChange={(e) => setBackgroundColor(e.target.value)}
+                          className="flex-1 h-10 text-sm"
+                          placeholder="#ffffff"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Imagem de Fundo</Label>
+                      <Button
+                        onClick={() => fileInputRef.current?.click()}
+                        variant="outline"
+                        className="w-full text-xs"
+                      >
+                        <Upload className="h-3 w-3 mr-2" />
+                        Upload Imagem
+                      </Button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBackgroundUpload}
+                        className="hidden"
+                      />
+                      {backgroundImage && (
+                        <Button
+                          onClick={() => setBackgroundImage(null)}
+                          variant="destructive"
+                          size="sm"
+                          className="w-full text-xs"
+                        >
+                          Remover Imagem
+                        </Button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Tamanho do Certificado (px)</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label htmlFor="canvas-width" className="text-xs font-normal text-gray-500">
+                            Largura
+                          </Label>
+                          <Input
+                            id="canvas-width"
+                            type="number"
+                            value={canvasSize.width}
+                            onChange={(e) =>
+                              setCanvasSize((prev) => ({ ...prev, width: Number(e.target.value) || 1200 }))
+                            }
+                            className="h-8 text-sm"
+                            placeholder="Largura"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="canvas-height" className="text-xs font-normal text-gray-500">
+                            Altura
+                          </Label>
+                          <Input
+                            id="canvas-height"
+                            type="number"
+                            value={canvasSize.height}
+                            onChange={(e) =>
+                              setCanvasSize((prev) => ({ ...prev, height: Number(e.target.value) || 850 }))
+                            }
+                            className="h-8 text-sm"
+                            placeholder="Altura"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Zoom do Editor</Label>
+                      <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                        <span>Auto-ajustado para caber na tela</span>
+                      </div>
+                      <Slider
+                        value={[zoom]}
+                        onValueChange={([value]) => setZoom(value)}
+                        min={0.3}
+                        max={1.2}
+                        step={0.1}
+                        className="w-full"
+                      />
+                      <div className="text-xs text-gray-500 text-center">{Math.round(zoom * 100)}%</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="layers" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Camadas</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {elements
+                        .sort((a, b) => b.zIndex - a.zIndex)
+                        .map((element) => (
+                          <div
+                            key={element.id}
+                            className={`flex items-center justify-between p-2 rounded text-xs cursor-grab active:cursor-grabbing transition-colors ${
+                              selectedElement === element.id
+                                ? "bg-blue-100 border border-blue-300"
+                                : "bg-gray-50 hover:bg-gray-100"
+                            }`}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("text/plain", element.id)
+                              e.dataTransfer.effectAllowed = "move"
+                            }}
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = "move"
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              const draggedElementId = e.dataTransfer.getData("text/plain")
+                              const draggedElement = elements.find((el) => el.id === draggedElementId)
+                              const targetElement = element
+                              if (draggedElement && draggedElement.id !== targetElement.id) {
+                                setElements((prev) =>
+                                  prev.map((el) => {
+                                    if (el.id === draggedElement.id) return { ...el, zIndex: targetElement.zIndex }
+                                    if (el.id === targetElement.id) return { ...el, zIndex: draggedElement.zIndex }
+                                    return el
+                                  }),
+                                )
+                              }
+                            }}
+                            onClick={() => setSelectedElement(element.id)}
+                          >
+                            <div className="flex items-center space-x-2">
+                              {element.type === "text" && <Type className="h-3 w-3" />}
+                              {element.type === "placeholder" && <Tag className="h-3 w-3" />}
+                              {element.type === "image" && <ImageIcon className="h-3 w-3" />}
+                              {element.type === "image-placeholder" && <ImageIcon className="h-3 w-3" />}
+                              {element.type === "qrcode" && <QrCode className="h-3 w-3" />}
+                              <span className="truncate max-w-[120px]">
+                                {element.type === "qrcode"
+                                  ? "QR Code"
+                                  : element.type === "placeholder"
+                                    ? placeholders.find((p) => p.id === element.placeholderId)?.label || element.content
+                                    : element.content || "Imagem"}
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <Badge variant="outline" className="text-xs">
+                                {element.zIndex}
+                              </Badge>
+                              <div className="w-4 h-4 flex items-center justify-center cursor-grab active:cursor-grabbing">
+                                <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+                                <div className="w-1 h-1 bg-gray-400 rounded-full ml-0.5"></div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </div>
         </ScrollArea>
       </div>
 
-      {/* Main Canvas Area */}
+      {/* Área Principal */}
       <div className="flex-1 flex flex-col">
-        <div className="bg-white border-b p-3 flex items-center justify-between">
+        <div className="bg-white border-b p-3 flex justify-between items-center">
           <div className="flex items-center space-x-4">
-            <h3 className="font-medium">Editor de Certificado</h3>
-            <Badge variant="outline">
+            <h1 className="text-lg font-semibold">Editor de Certificado</h1>
+            <Badge variant="outline" className="text-xs">
               {canvasSize.width} x {canvasSize.height}px
             </Badge>
-            <Badge variant="outline">{elements.length} elementos</Badge>
+            <Badge variant="secondary" className="text-xs">
+              {elements.length} elementos
+            </Badge>
           </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant={showPreview ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowPreview(!showPreview)}
-            >
+          <div className="flex items-center space-x-4">
+            <Button variant="outline" size="sm" onClick={() => setShowPreview(!showPreview)}>
               <Eye className="h-4 w-4 mr-2" />
-              {showPreview ? "Editar" : "Visualizar Preview"}
+              {showPreview ? "Voltar ao Editor" : "Visualizar Preview"}
             </Button>
           </div>
         </div>
-
-        <div className="flex-1 overflow-auto bg-white p-4 flex items-center justify-center">
-          <div
-            ref={canvasRef}
-            className="relative bg-white shadow-lg"
-            style={{
-              width: canvasSize.width * zoom,
-              height: canvasSize.height * zoom,
-              backgroundColor: backgroundColor,
-              backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-              backgroundRepeat: "no-repeat",
-            }}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setSelectedElement(null)
-              }
-            }}
-          >
-            {elements.sort((a, b) => a.zIndex - b.zIndex).map((element) => renderElement(element, showPreview))}
+        {!showPreview && (
+          <div className="bg-gray-50 border-b p-2 flex items-center space-x-2 overflow-x-auto">
+            <div className="flex items-center space-x-1">
+              <Button
+                size="sm"
+                variant={selectedElementData?.fontWeight === "bold" ? "default" : "outline"}
+                onClick={() =>
+                  updateSelectedElement({
+                    fontWeight: selectedElementData?.fontWeight === "bold" ? "normal" : "bold",
+                  })
+                }
+                disabled={!selectedElementData}
+              >
+                <Bold className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedElementData?.fontStyle === "italic" ? "default" : "outline"}
+                onClick={() =>
+                  updateSelectedElement({
+                    fontStyle: selectedElementData?.fontStyle === "italic" ? "normal" : "italic",
+                  })
+                }
+                disabled={!selectedElementData}
+              >
+                <Italic className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedElementData?.textDecoration === "underline" ? "default" : "outline"}
+                onClick={() =>
+                  updateSelectedElement({
+                    textDecoration: selectedElementData?.textDecoration === "underline" ? "none" : "underline",
+                  })
+                }
+                disabled={!selectedElementData}
+              >
+                <Underline className="h-3 w-3" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center space-x-1">
+              <Button
+                size="sm"
+                variant={selectedElementData?.textAlign === "left" ? "default" : "outline"}
+                onClick={() => updateSelectedElement({ textAlign: "left" })}
+                disabled={!selectedElementData}
+              >
+                <AlignLeft className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedElementData?.textAlign === "center" ? "default" : "outline"}
+                onClick={() => updateSelectedElement({ textAlign: "center" })}
+                disabled={!selectedElementData}
+              >
+                <AlignCenter className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedElementData?.textAlign === "right" ? "default" : "outline"}
+                onClick={() => updateSelectedElement({ textAlign: "right" })}
+                disabled={!selectedElementData}
+              >
+                <AlignRight className="h-3 w-3" />
+              </Button>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center space-x-2">
+              <Input
+                type="color"
+                value={selectedElementData?.color || "#000000"}
+                onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                className="w-8 h-8 p-0 border-0"
+                title="Cor do texto"
+                disabled={!selectedElementData}
+              />
+              <Input
+                type="number"
+                value={selectedElementData?.fontSize || 18}
+                onChange={(e) => updateSelectedElement({ fontSize: Number(e.target.value) })}
+                className="w-16 h-8 text-xs"
+                min="8"
+                max="72"
+                disabled={!selectedElementData}
+              />
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center space-x-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={duplicateSelectedElement}
+                title="Duplicar"
+                disabled={!selectedElementData}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => moveElementLayer("up")}
+                title="Trazer para frente"
+                disabled={!selectedElementData}
+              >
+                ↑
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => moveElementLayer("down")}
+                title="Enviar para trás"
+                disabled={!selectedElementData}
+              >
+                ↓
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={deleteSelectedElement}
+                title="Excluir"
+                disabled={!selectedElementData}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+        <div className="flex-1 overflow-auto bg-gray-100 p-4">
+          <div className="flex justify-center">
+            <div
+              ref={canvasRef}
+              className="relative bg-white shadow-lg border"
+              style={{
+                width: canvasSize.width * zoom,
+                height: canvasSize.height * zoom,
+                backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+                backgroundColor: backgroundImage ? undefined : backgroundColor,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+              }}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onClick={() => setSelectedElement(null)}
+            >
+              {!showPreview && (
+                <div
+                  className="absolute inset-0 opacity-5 pointer-events-none"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3Cpattern id='grid' width='10' height='10' patternUnits='userSpaceOnUse'%3E%3Cpath d='M10 0H0V10H10V0Z' fill='%23f0f0f0'/%3E%3Cpath d='M0 0L10 10' stroke='%23e0e0e0' strokeWidth='0.5'/%3E%3Cpath d='M10 0L0 10' stroke='%23e0e0e0' strokeWidth='0.5'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width='100' height='100' fill='url(%23grid)'/%3E%3C/svg%3E")`,
+                  }}
+                />
+              )}
+              {elements.sort((a, b) => a.zIndex - b.zIndex).map((element) => renderElement(element, showPreview))}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Right Sidebar */}
-      <div className="w-[320px] bg-white border-l flex flex-col">
+      {/* Sidebar Direita - Configurações do Elemento */}
+      <div className="w-[320px] bg-white border-l flex-shrink-0 flex flex-col">
         <div className="p-4 border-b">
-          <h3 className="font-medium">
+          <h2 className="text-lg font-semibold">
             {selectedElement ? "Configurações do Elemento" : "Nenhum Elemento Selecionado"}
-          </h3>
-          <p className="text-sm text-gray-600 mt-1">
-            {selectedElement
-              ? "Ajuste as propriedades do elemento selecionado"
-              : "Selecione um elemento para editar suas propriedades."}
-          </p>
+          </h2>
+          <p className="text-sm text-gray-600">Ajuste as propriedades do elemento selecionado</p>
         </div>
-
-        <ScrollArea className="flex-1">
-          {selectedElement ? (
+        {selectedElement ? (
+          <ScrollArea className="flex-1">
             <div className="p-4 space-y-4">
-              {/* Element properties will be rendered here */}
-              <div className="text-center text-gray-500 text-sm">Propriedades do elemento em desenvolvimento</div>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Geral</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Conteúdo</Label>
+                    {selectedElementData?.type === "image" ? (
+                      <p className="text-sm text-gray-500">Imagem estática</p>
+                    ) : selectedElementData?.type === "qrcode" ? (
+                      <p className="text-sm text-gray-500">QR Code</p>
+                    ) : (
+                      <Input
+                        type="text"
+                        value={selectedElementData?.content}
+                        onChange={(e) => updateSelectedElement({ content: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Posição X (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.x}
+                      onChange={(e) => updateSelectedElement({ x: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Posição Y (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.y}
+                      onChange={(e) => updateSelectedElement({ y: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Largura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.width}
+                      onChange={(e) => updateSelectedElement({ width: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Altura (px)</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.height}
+                      onChange={(e) => updateSelectedElement({ height: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+              {selectedElementData?.type === "text" || selectedElementData?.type === "placeholder" ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Texto</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Fonte</Label>
+                      <Select
+                        value={selectedElementData?.fontFamily}
+                        onValueChange={(value) => updateSelectedElement({ fontFamily: value })}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FONT_FAMILIES.map((font) => (
+                            <SelectItem key={font.value} value={font.value}>
+                              {font.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Tamanho da Fonte (px)</Label>
+                      <Input
+                        type="number"
+                        value={selectedElementData?.fontSize}
+                        onChange={(e) => updateSelectedElement({ fontSize: Number(e.target.value) })}
+                        className="h-8 text-sm"
+                        min="8"
+                        max="72"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Cor do Texto</Label>
+                      <div className="flex items-center space-x-2">
+                        <Input
+                          type="color"
+                          value={selectedElementData?.color || "#000000"}
+                          onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                          className="w-12 h-10 p-1 border rounded"
+                        />
+                        <Input
+                          type="text"
+                          value={selectedElementData?.color || "#000000"}
+                          onChange={(e) => updateSelectedElement({ color: e.target.value })}
+                          className="flex-1 h-10 text-sm"
+                          placeholder="#000000"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Alinhamento</Label>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "left" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "left" })}
+                        >
+                          <AlignLeft className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "center" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "center" })}
+                        >
+                          <AlignCenter className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={selectedElementData?.textAlign === "right" ? "default" : "outline"}
+                          onClick={() => updateSelectedElement({ textAlign: "right" })}
+                        >
+                          <AlignRight className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Aparência</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Opacidade</Label>
+                    <Slider
+                      value={[selectedElementData?.opacity || 1]}
+                      onValueChange={([value]) => updateSelectedElement({ opacity: value })}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Cor de Fundo</Label>
+                    <div className="flex items-center space-x-2">
+                      <Input
+                        type="color"
+                        value={selectedElementData?.backgroundColor || "#ffffff"}
+                        onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
+                        className="w-12 h-10 p-1 border rounded"
+                      />
+                      <Input
+                        type="text"
+                        value={selectedElementData?.backgroundColor || "#ffffff"}
+                        onChange={(e) => updateSelectedElement({ backgroundColor: e.target.value })}
+                        className="flex-1 h-10 text-sm"
+                        placeholder="#ffffff"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Borda</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label htmlFor="border-width" className="text-xs font-normal text-gray-500">
+                          Largura
+                        </Label>
+                        <Input
+                          id="border-width"
+                          type="number"
+                          value={selectedElementData?.borderWidth}
+                          onChange={(e) => updateSelectedElement({ borderWidth: Number(e.target.value) })}
+                          className="h-8 text-sm"
+                          placeholder="Largura"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="border-color" className="text-xs font-normal text-gray-500">
+                          Cor
+                        </Label>
+                        <Input
+                          type="color"
+                          value={selectedElementData?.borderColor || "#000000"}
+                          onChange={(e) => updateSelectedElement({ borderColor: e.target.value })}
+                          className="w-12 h-10 p-1 border rounded"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Raio da Borda</Label>
+                    <Input
+                      type="number"
+                      value={selectedElementData?.borderRadius}
+                      onChange={(e) => updateSelectedElement({ borderRadius: Number(e.target.value) })}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          ) : (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              Selecione um elemento para editar suas propriedades.
-            </div>
-          )}
-        </ScrollArea>
+          </ScrollArea>
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-4 text-center text-gray-500">
+            Selecione um elemento para editar suas propriedades.
+          </div>
+        )}
       </div>
-
-      {/* Hidden file inputs */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          // Handle static image upload
-          const file = e.target.files?.[0]
-          if (file) {
-            const reader = new FileReader()
-            reader.onload = (event) => {
-              const imageUrl = event.target?.result as string
-              const newElement: CertificateElement = {
-                id: `image_${Date.now()}`,
-                type: "image",
-                content: "",
-                x: 100,
-                y: 100,
-                width: 200,
-                height: 150,
-                fontSize: 16,
-                fontFamily: "Arial",
-                fontWeight: "normal",
-                fontStyle: "normal",
-                textDecoration: "none",
-                color: "#000000",
-                backgroundColor: "transparent",
-                textAlign: "center",
-                rotation: 0,
-                opacity: 1,
-                borderWidth: 0,
-                borderColor: "#000000",
-                borderRadius: 0,
-                imageUrl: imageUrl,
-                zIndex: elements.length + 1,
-              }
-              setElements((prev) => [...prev, newElement])
-              setSelectedElement(newElement.id)
-            }
-            reader.readAsDataURL(file)
-          }
-        }}
-      />
-      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
     </div>
   )
 }

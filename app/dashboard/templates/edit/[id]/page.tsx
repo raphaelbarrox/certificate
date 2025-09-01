@@ -130,127 +130,34 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
         throw new Error("O título do template é obrigatório.")
       }
 
-      if (template.title.trim().length < 3) {
-        throw new Error("O título deve ter pelo menos 3 caracteres.")
-      }
-
-      if (template.title.trim().length > 255) {
-        throw new Error("O título não pode ter mais de 255 caracteres.")
-      }
-
       if (!template.template_data?.elements?.length) {
         throw new Error("O template deve ter pelo menos um elemento.")
-      }
-
-      // Validar elementos do template
-      const invalidElements = template.template_data.elements.filter(
-        (el: any) => !el.id || !el.type || typeof el.x !== "number" || typeof el.y !== "number",
-      )
-
-      if (invalidElements.length > 0) {
-        throw new Error(`${invalidElements.length} elemento(s) têm dados inválidos. Verifique o design.`)
-      }
-
-      // Validar placeholders se existirem
-      if (template.placeholders?.length > 0) {
-        const invalidPlaceholders = template.placeholders.filter((p: any) => !p.id || !p.label)
-        if (invalidPlaceholders.length > 0) {
-          throw new Error(`${invalidPlaceholders.length} placeholder(s) têm dados inválidos.`)
-        }
       }
 
       const updateData = {
         title: template.title.trim(),
         description: template.description?.trim() || null,
-        template_data: {
-          ...template.template_data,
-          // Garantir que elementos tenham zIndex válido
-          elements: template.template_data.elements.map((el: any, index: number) => ({
-            ...el,
-            zIndex: el.zIndex || index + 1,
-          })),
-        },
-        form_design: template.form_design || null,
+        template_data: template.template_data,
+        form_design: template.form_design,
         is_active: template.is_active,
         folder_id: template.folder_id,
         placeholders: template.placeholders || [],
         updated_at: new Date().toISOString(),
       }
 
-      const dataSize = new Blob([JSON.stringify(updateData)]).size
-      if (dataSize > 10 * 1024 * 1024) {
-        // 10MB limit
-        throw new Error("Template muito grande. Reduza o número de elementos ou imagens.")
-      }
+      console.log("[v0] Enviando dados para Supabase...")
 
-      console.log("[v0] Dados validados, enviando para Supabase:", {
-        dataSize: `${(dataSize / 1024).toFixed(2)}KB`,
-        elementsCount: updateData.template_data.elements.length,
-        hasFormDesign: !!updateData.form_design,
-      })
+      const { error } = await supabase.from("certificate_templates").update(updateData).eq("id", template.id)
 
-      let saveAttempts = 0
-      const maxSaveAttempts = 3
-      let lastError: any = null
-
-      while (saveAttempts < maxSaveAttempts) {
-        try {
-          const { error } = await supabase.from("certificate_templates").update(updateData).eq("id", template.id)
-
-          if (error) {
-            throw error
-          }
-
-          // Sucesso - sair do loop
-          break
-        } catch (attemptError: any) {
-          saveAttempts++
-          lastError = attemptError
-
-          console.error(`[v0] Tentativa ${saveAttempts} falhou:`, attemptError)
-
-          if (saveAttempts < maxSaveAttempts) {
-            // Aguardar antes da próxima tentativa (backoff exponencial)
-            const delay = Math.pow(2, saveAttempts) * 1000 // 2s, 4s, 8s
-            await new Promise((resolve) => setTimeout(resolve, delay))
-          }
-        }
-      }
-
-      // Se chegou aqui e ainda há erro, falhou todas as tentativas
-      if (saveAttempts >= maxSaveAttempts && lastError) {
-        throw lastError
+      if (error) {
+        console.error("[v0] Erro do Supabase:", error)
+        throw error
       }
 
       const localStorageKey = `editor-state-${template.id}`
       try {
-        // Verificar se o localStorage tem dados mais recentes
-        const localData = localStorage.getItem(localStorageKey)
-        if (localData) {
-          const parsedLocal = JSON.parse(localData)
-          const localElements = parsedLocal.elements?.length || 0
-          const savedElements = updateData.template_data.elements.length
-
-          // Só limpar se os dados salvos são mais recentes ou iguais
-          if (savedElements >= localElements) {
-            localStorage.removeItem(localStorageKey)
-            console.log("[v0] localStorage limpo após salvamento bem-sucedido")
-          } else {
-            console.log("[v0] localStorage mantido - contém dados mais recentes")
-          }
-        }
-
-        // Limpar backups antigos deste template
-        Object.keys(localStorage).forEach((key) => {
-          if (key.startsWith(`editor-backup-${template.id}-`)) {
-            const backupData = JSON.parse(localStorage.getItem(key) || "{}")
-            const backupAge = Date.now() - (backupData.timestamp || 0)
-            if (backupAge > 60000) {
-              // Mais de 1 minuto
-              localStorage.removeItem(key)
-            }
-          }
-        })
+        localStorage.removeItem(localStorageKey)
+        console.log("[v0] localStorage limpo após salvamento bem-sucedido")
       } catch (storageError) {
         console.warn("[v0] Erro ao limpar localStorage:", storageError)
         // Não falhar o salvamento por causa disso
@@ -264,12 +171,11 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
       })
 
       setHasUnsavedChanges(false)
-    } catch (error: any) {
+    } catch (error) {
       console.error("[v0] Erro completo ao salvar:", error)
 
       let errorMessage = "Não foi possível salvar o template."
       let errorDescription = "Tente novamente em alguns instantes."
-      let shouldRetry = true
 
       if (error.message?.includes("network") || error.message?.includes("fetch")) {
         errorMessage = "Erro de Conexão"
@@ -277,38 +183,21 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
       } else if (error.message?.includes("permission") || error.code === "42501") {
         errorMessage = "Sem Permissão"
         errorDescription = "Você não tem permissão para salvar este template. Verifique se está logado."
-        shouldRetry = false
       } else if (error.code === "PGRST116") {
         errorMessage = "Template Não Encontrado"
         errorDescription = "Este template pode ter sido excluído. Recarregue a página."
-        shouldRetry = false
-      } else if (
-        error.message?.includes("título") ||
-        error.message?.includes("elemento") ||
-        error.message?.includes("placeholder")
-      ) {
+      } else if (error.message?.includes("título")) {
         errorMessage = "Dados Inválidos"
         errorDescription = error.message
-        shouldRetry = false
-      } else if (error.message?.includes("muito grande")) {
-        errorMessage = "Template Muito Grande"
+      } else if (error.message?.includes("elementos")) {
+        errorMessage = "Template Vazio"
         errorDescription = error.message
-        shouldRetry = false
-      } else if (error.code === "23505") {
-        errorMessage = "Conflito de Dados"
-        errorDescription = "Outro usuário pode ter modificado este template. Recarregue a página."
-        shouldRetry = false
       }
 
       toast({
         title: errorMessage,
         description: errorDescription,
         variant: "destructive",
-        action: shouldRetry ? (
-          <Button variant="outline" size="sm" onClick={saveTemplate}>
-            Tentar Novamente
-          </Button>
-        ) : undefined,
       })
     } finally {
       setSaving(false)
