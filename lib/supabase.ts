@@ -1,50 +1,17 @@
-import { createClient } from "@supabase/supabase-js"
+import { createClient } from "./supabase/client"
+import { createClient as createServerClient } from "./supabase/server"
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+// Cliente principal usando SSR
+export const supabase = createClient()
 
-// Verificação de configuração
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("[v0] Configuração do Supabase incompleta:", {
-    hasUrl: !!supabaseUrl,
-    hasKey: !!supabaseAnonKey,
-  })
-}
-
-console.log("[v0] Inicializando cliente Supabase:", {
-  url: supabaseUrl?.substring(0, 30) + "...",
-  keyLength: supabaseAnonKey?.length,
-})
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-  global: {
-    headers: {
-      "X-Client-Info": "certificate-generator-v1",
-    },
-  },
-})
-
+// Listener para mudanças de autenticação
 supabase.auth.onAuthStateChange((event, session) => {
   console.log("[v0] Auth state changed:", event, session?.user?.id)
 })
 
-// Export createClient for use in other modules
-export { createClient }
+export { createServerClient }
 
-// Server-side client for admin operations
-export const createServerClient = () => {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  })
-}
-
+// Tipos do banco de dados
 export type Database = {
   public: {
     Tables: {

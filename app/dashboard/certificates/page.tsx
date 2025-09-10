@@ -1,10 +1,9 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useCallback, useMemo } from "react"
+import { useEffect, useState, useCallback } from "react"
 import Link from "next/link"
 import { useAuth } from "@/components/auth-provider"
-import { createClient } from "@/lib/supabase/client"
 import DashboardLayout from "@/components/dashboard-layout"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -30,6 +29,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
+import { dashboardQueries, type DashboardStats, type ChartData } from "@/lib/dashboard-queries"
 
 // --- TYPE DEFINITIONS ---
 interface Template {
@@ -47,19 +47,6 @@ interface IssuedCertificate {
     id: string
     title: string
   } | null
-}
-
-interface DashboardStats {
-  today: number
-  change: number
-  last7days: number
-  totalCertificates: number
-  totalTemplates: number
-}
-
-interface ChartData {
-  date: string
-  Certificados: number
 }
 
 const CERTIFICATES_PER_PAGE = 10
@@ -124,7 +111,7 @@ function TemplateFilterCombobox({
   onSelectTemplate,
   loading,
 }: {
-  templates: Template[]
+  templates: any[]
   selectedTemplate: string
   onSelectTemplate: (templateId: string) => void
   loading: boolean
@@ -190,161 +177,77 @@ function TemplateFilterCombobox({
 // --- MAIN PAGE COMPONENT ---
 export default function CertificatesPage() {
   const { user } = useAuth()
-  const supabase = createClient()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [chartData, setChartData] = useState<ChartData[]>([])
-  const [allCertificates, setAllCertificates] = useState<IssuedCertificate[]>([])
-  const [templates, setTemplates] = useState<Template[]>([])
+  const [certificates, setCertificates] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedTemplate, setSelectedTemplate] = useState("all")
   const [debouncedSearchTerm] = useDebounce(searchTerm, 500)
   const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCertificates, setTotalCertificates] = useState(0)
 
   const fetchData = useCallback(async () => {
     if (!user) return
     setLoading(true)
 
     try {
-      // --- Date calculations in UTC to avoid timezone issues ---
-      const now = new Date()
-      const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-      const yesterdayUTC = new Date(todayUTC)
-      yesterdayUTC.setUTCDate(todayUTC.getUTCDate() - 1)
-      const sevenDaysAgoUTC = new Date(todayUTC)
-      sevenDaysAgoUTC.setUTCDate(todayUTC.getUTCDate() - 6)
+      // Carregar estatísticas e dados do gráfico em paralelo
+      const [dashboardStats, chartDataResult, templatesResult] = await Promise.all([
+        dashboardQueries.getDashboardStats(user.id),
+        dashboardQueries.getChartData(user.id),
+        dashboardQueries.getTemplatesWithCache(user.id),
+      ])
 
-      // --- Parallel data fetching ---
-      const [todayData, yesterdayData, sevenDaysData, totalData, userTemplatesData, chartRawData, allCertificatesData] =
-        await Promise.all([
-          supabase
-            .from("issued_certificates")
-            .select("id, certificate_templates!inner(user_id)", { count: "exact", head: true })
-            .eq("certificate_templates.user_id", user.id)
-            .gte("issued_at", todayUTC.toISOString()),
-          supabase
-            .from("issued_certificates")
-            .select("id, certificate_templates!inner(user_id)", { count: "exact", head: true })
-            .eq("certificate_templates.user_id", user.id)
-            .gte("issued_at", yesterdayUTC.toISOString())
-            .lt("issued_at", todayUTC.toISOString()),
-          supabase
-            .from("issued_certificates")
-            .select("id, certificate_templates!inner(user_id)", { count: "exact", head: true })
-            .eq("certificate_templates.user_id", user.id)
-            .gte("issued_at", sevenDaysAgoUTC.toISOString()),
-          supabase
-            .from("issued_certificates")
-            .select("id, certificate_templates!inner(user_id)", { count: "exact", head: true })
-            .eq("certificate_templates.user_id", user.id),
-          supabase.from("certificate_templates").select("id, title").eq("user_id", user.id),
-          supabase
-            .from("issued_certificates")
-            .select("issued_at, certificate_templates!inner(user_id)")
-            .eq("certificate_templates.user_id", user.id)
-            .gte("issued_at", sevenDaysAgoUTC.toISOString()),
-          supabase
-            .from("issued_certificates")
-            .select(
-              `id, certificate_number, recipient_data, recipient_email, issued_at, certificate_templates!inner(id, title, user_id)`,
-            )
-            .eq("certificate_templates.user_id", user.id)
-            .order("issued_at", { ascending: false }),
-        ])
-
-      // --- Error handling ---
-      const errors = [
-        todayData.error,
-        yesterdayData.error,
-        sevenDaysData.error,
-        totalData.error,
-        userTemplatesData.error,
-        chartRawData.error,
-        allCertificatesData.error,
-      ].filter(Boolean)
-      if (errors.length > 0) {
-        throw new Error(errors.map((e) => e.message).join(", "))
-      }
-
-      // --- Process stats ---
-      const todayCount = todayData.count ?? 0
-      const yesterdayCount = yesterdayData.count ?? 0
-      const change =
-        yesterdayCount > 0 ? ((todayCount - yesterdayCount) / yesterdayCount) * 100 : todayCount > 0 ? 100 : 0
-      setStats({
-        today: todayCount,
-        change,
-        last7days: sevenDaysData.count ?? 0,
-        totalCertificates: totalData.count ?? 0,
-        totalTemplates: userTemplatesData.data?.length ?? 0,
-      })
-
-      // --- Process chart data (UTC based) ---
-      const countsByDay = new Map<string, number>()
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(todayUTC)
-        d.setUTCDate(todayUTC.getUTCDate() - i)
-        const day = String(d.getUTCDate()).padStart(2, "0")
-        const month = String(d.getUTCMonth() + 1).padStart(2, "0")
-        countsByDay.set(`${day}/${month}`, 0)
-      }
-      ;(chartRawData.data || []).forEach((cert) => {
-        const issuedDate = new Date(cert.issued_at)
-        const day = String(issuedDate.getUTCDate()).padStart(2, "0")
-        const month = String(issuedDate.getUTCMonth() + 1).padStart(2, "0")
-        const dateKey = `${day}/${month}`
-        if (countsByDay.has(dateKey)) {
-          countsByDay.set(dateKey, (countsByDay.get(dateKey) || 0) + 1)
-        }
-      })
-      const formattedChartData = Array.from(countsByDay.entries())
-        .map(([date, count]) => ({ date, Certificados: count }))
-        .reverse()
-      setChartData(formattedChartData)
-
-      // --- Set state for certificates and templates ---
-      setAllCertificates((allCertificatesData.data as IssuedCertificate[]) || [])
-      setTemplates(userTemplatesData.data || [])
+      setStats(dashboardStats)
+      setChartData(chartDataResult)
+      setTemplates(templatesResult)
     } catch (error) {
       console.error("Error fetching dashboard data:", error)
     } finally {
       setLoading(false)
     }
-  }, [user, supabase])
+  }, [user])
+
+  const fetchCertificates = useCallback(async () => {
+    if (!user) return
+
+    try {
+      const result = await dashboardQueries.getCertificatesPaginated(
+        user.id,
+        currentPage,
+        CERTIFICATES_PER_PAGE,
+        debouncedSearchTerm || undefined,
+        selectedTemplate !== "all" ? selectedTemplate : undefined,
+      )
+
+      setCertificates(result.certificates)
+      setTotalPages(result.totalPages)
+      setTotalCertificates(result.total)
+    } catch (error) {
+      console.error("Error fetching certificates:", error)
+    }
+  }, [user, currentPage, debouncedSearchTerm, selectedTemplate])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
 
-  const filteredCertificates = useMemo(() => {
-    let result = allCertificates
+  useEffect(() => {
+    fetchCertificates()
+  }, [fetchCertificates])
 
-    if (selectedTemplate !== "all") {
-      result = result.filter((cert) => cert.certificate_templates?.id === selectedTemplate)
-    }
-
-    if (!debouncedSearchTerm) return result
-    const searchLower = debouncedSearchTerm.toLowerCase()
-    return result.filter(
-      (cert) =>
-        cert.certificate_number.toLowerCase().includes(searchLower) ||
-        (cert.recipient_email && cert.recipient_email.toLowerCase().includes(searchLower)) ||
-        (cert.certificate_templates?.title && cert.certificate_templates.title.toLowerCase().includes(searchLower)) ||
-        Object.values(cert.recipient_data).some((val) => String(val).toLowerCase().includes(searchLower)),
-    )
-  }, [debouncedSearchTerm, allCertificates, selectedTemplate])
-
-  const paginatedCertificates = useMemo(() => {
-    const startIndex = (currentPage - 1) * CERTIFICATES_PER_PAGE
-    return filteredCertificates.slice(startIndex, startIndex + CERTIFICATES_PER_PAGE)
-  }, [filteredCertificates, currentPage])
-
-  const totalPages = Math.ceil(filteredCertificates.length / CERTIFICATES_PER_PAGE)
+  // Reset page when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedSearchTerm, selectedTemplate])
 
   const handleExport = () => {
     if (!user) return
-    const formattedData = filteredCertificates.map((cert) => ({
+    const formattedData = certificates.map((cert) => ({
       ID_Certificado: cert.certificate_number,
       Nome_Recebedor: cert.recipient_data?.name || cert.recipient_data?.nome_completo || "N/A",
       Email_Recebedor: cert.recipient_email || "N/A",
@@ -370,7 +273,7 @@ export default function CertificatesPage() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard de Certificados</h1>
             <p className="text-gray-600 dark:text-gray-400">Métricas e visão geral dos certificados emitidos.</p>
           </div>
-          <Button onClick={handleExport} disabled={loading || filteredCertificates.length === 0}>
+          <Button onClick={handleExport} disabled={loading || certificates.length === 0}>
             <FileDown className="mr-2 h-4 w-4" />
             Exportar Dados
           </Button>
@@ -465,20 +368,14 @@ export default function CertificatesPage() {
                   <Input
                     placeholder="Buscar por número, email ou dados do recebedor..."
                     value={searchTerm}
-                    onChange={(e) => {
-                      setSearchTerm(e.target.value)
-                      setCurrentPage(1)
-                    }}
+                    onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10"
                   />
                 </div>
                 <TemplateFilterCombobox
                   templates={templates}
                   selectedTemplate={selectedTemplate}
-                  onSelectTemplate={(templateId) => {
-                    setSelectedTemplate(templateId)
-                    setCurrentPage(1)
-                  }}
+                  onSelectTemplate={setSelectedTemplate}
                   loading={loading}
                 />
               </div>
@@ -501,8 +398,8 @@ export default function CertificatesPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paginatedCertificates.length > 0 ? (
-                        paginatedCertificates.map((cert) => (
+                      {certificates.length > 0 ? (
+                        certificates.map((cert) => (
                           <TableRow key={cert.id}>
                             <TableCell>
                               <div className="font-medium">
@@ -543,28 +440,35 @@ export default function CertificatesPage() {
               )}
 
               {totalPages > 1 && (
-                <div className="flex items-center justify-end space-x-2 py-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((p) => p - 1)}
-                    disabled={currentPage === 1}
-                  >
-                    <ChevronLeft className="mr-1 h-4 w-4" />
-                    Anterior
-                  </Button>
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
-                    Página {currentPage} de {totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((p) => p + 1)}
-                    disabled={currentPage === totalPages}
-                  >
-                    Próxima
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                  </Button>
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="text-sm text-gray-700 dark:text-gray-300">
+                    Mostrando {(currentPage - 1) * CERTIFICATES_PER_PAGE + 1} a{" "}
+                    {Math.min(currentPage * CERTIFICATES_PER_PAGE, totalCertificates)} de {totalCertificates}{" "}
+                    certificados
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((p) => p - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      Anterior
+                    </Button>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      Página {currentPage} de {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((p) => p + 1)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Próxima
+                      <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>

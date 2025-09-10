@@ -5,21 +5,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { FileText, Award, Plus, TrendingUp } from "lucide-react"
 import Link from "next/link"
-import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/components/auth-provider"
 import DashboardLayout from "@/components/dashboard-layout"
-
-interface DashboardStats {
-  totalTemplates: number
-  totalCertificates: number
-  thisMonthCertificates: number
-}
+import { dashboardQueries, type DashboardStats } from "@/lib/dashboard-queries"
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     totalTemplates: 0,
     totalCertificates: 0,
     thisMonthCertificates: 0,
+    today: 0,
+    change: 0,
+    last7days: 0,
   })
   const [loading, setLoading] = useState(true)
   const { user } = useAuth()
@@ -34,46 +31,9 @@ export default function DashboardPage() {
     if (!user) return
 
     try {
-      // Get total templates
-      const { count: templatesCount } = await supabase
-        .from("certificate_templates")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-
-      // Get total certificates
-      const { count: certificatesCount } = await supabase
-        .from("issued_certificates")
-        .select(
-          `
-          *,
-          certificate_templates!inner (user_id)
-        `,
-          { count: "exact", head: true },
-        )
-        .eq("certificate_templates.user_id", user.id)
-
-      // Get this month's certificates
-      const startOfMonth = new Date()
-      startOfMonth.setDate(1)
-      startOfMonth.setHours(0, 0, 0, 0)
-
-      const { count: thisMonthCount } = await supabase
-        .from("issued_certificates")
-        .select(
-          `
-          *,
-          certificate_templates!inner (user_id)
-        `,
-          { count: "exact", head: true },
-        )
-        .eq("certificate_templates.user_id", user.id)
-        .gte("issued_at", startOfMonth.toISOString())
-
-      setStats({
-        totalTemplates: templatesCount || 0,
-        totalCertificates: certificatesCount || 0,
-        thisMonthCertificates: thisMonthCount || 0,
-      })
+      setLoading(true)
+      const dashboardStats = await dashboardQueries.getDashboardStats(user.id)
+      setStats(dashboardStats)
     } catch (error) {
       console.error("Error loading stats:", error)
     } finally {
@@ -144,6 +104,20 @@ export default function DashboardPage() {
             <CardContent>
               <div className="text-2xl font-bold">{stats.thisMonthCertificates}</div>
               <p className="text-xs text-muted-foreground">Certificados emitidos</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Hoje</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.today}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.change >= 0 ? "+" : ""}
+                {stats.change.toFixed(1)}% em relação a ontem
+              </p>
             </CardContent>
           </Card>
         </div>

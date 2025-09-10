@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -40,6 +40,8 @@ export default function RegisterPage() {
     setLoading(true)
 
     try {
+      const supabase = createClient()
+
       const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -56,6 +58,7 @@ export default function RegisterPage() {
         router.push("/dashboard")
       }
     } catch (error: any) {
+      console.error("[v0] Erro no registro:", error)
       setError(error.message || "Erro ao criar conta")
     } finally {
       setLoading(false)

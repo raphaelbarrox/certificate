@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -27,6 +27,8 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
+      const supabase = createClient()
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
@@ -38,6 +40,7 @@ export default function LoginPage() {
         router.push("/dashboard")
       }
     } catch (error: any) {
+      console.error("[v0] Erro no login:", error)
       setError(error.message || "Erro ao fazer login")
     } finally {
       setLoading(false)

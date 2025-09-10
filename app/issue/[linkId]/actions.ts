@@ -36,37 +36,67 @@ export async function generateAndSaveCertificate(
   const recipientData: Record<string, any> = {}
 
   try {
-    // 2. Process form data and upload images
+    const imageUploads: Promise<{ fieldId: string; url?: string; error?: string }>[] = []
+    const regularFields: { fieldId: string; value: any }[] = []
+
+    // Separar campos de imagem dos campos regulares
     for (const field of formFields) {
       const value = formData.get(field.id)
 
       if (field.type === "image") {
         if (value instanceof File && value.size > 0) {
-          // Upload to Supabase Storage
           const filePath = `public/${templateId}/${Date.now()}-${value.name}`
-          const { error: uploadError } = await supabase.storage.from("certificate-images").upload(filePath, value)
+          imageUploads.push(
+            supabase.storage
+              .from("certificate-images")
+              .upload(filePath, value)
+              .then(({ error }) => {
+                if (error) {
+                  if (error.message.includes("Bucket not found")) {
+                    throw new Error(
+                      "Erro: O bucket de armazenamento 'certificate-images' não foi encontrado. Por favor, crie este bucket no seu painel Supabase.",
+                    )
+                  }
+                  throw new Error(`Erro ao enviar a imagem do campo "${field.label}". Detalhes: ${error.message}`)
+                }
 
-          if (uploadError) {
-            console.error("Supabase image upload error:", uploadError)
-            if (uploadError.message.includes("Bucket not found")) {
-              throw new Error(
-                "Erro: O bucket de armazenamento 'certificate-images' não foi encontrado. Por favor, crie este bucket no seu painel Supabase.",
-              )
-            }
-            throw new Error(`Erro ao enviar a imagem do campo "${field.label}". Detalhes: ${uploadError.message}`)
-          }
-
-          // Get public URL
-          const { data: urlData } = supabase.storage.from("certificate-images").getPublicUrl(filePath)
-          recipientData[field.placeholderId] = urlData.publicUrl
+                const { data: urlData } = supabase.storage.from("certificate-images").getPublicUrl(filePath)
+                return { fieldId: field.placeholderId, url: urlData.publicUrl }
+              })
+              .catch((error) => ({ fieldId: field.placeholderId, error: error.message })),
+          )
         } else if (field.required) {
           throw new Error(`O campo de imagem "${field.label}" é obrigatório.`)
         }
       } else {
         if (field.placeholderId) {
-          recipientData[field.placeholderId] = value
+          regularFields.push({ fieldId: field.placeholderId, value })
         }
       }
+    }
+
+    // Processar uploads de imagem em paralelo
+    if (imageUploads.length > 0) {
+      const uploadResults = await Promise.allSettled(imageUploads)
+
+      for (const result of uploadResults) {
+        if (result.status === "fulfilled") {
+          const { fieldId, url, error } = await result.value
+          if (error) {
+            throw new Error(error)
+          }
+          if (url) {
+            recipientData[fieldId] = url
+          }
+        } else {
+          throw new Error(`Erro no upload de imagem: ${result.reason}`)
+        }
+      }
+    }
+
+    // Processar campos regulares
+    for (const { fieldId, value } of regularFields) {
+      recipientData[fieldId] = value
     }
 
     // 3. Generate unique certificate number
