@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerClient } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/server"
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Query parameter is required" }, { status: 400 })
     }
 
-    const supabase = createServerClient()
+    const supabase = createClient()
 
     // Solução simples e performática:
     // Busca diretamente no banco de dados por uma correspondência exata (case-insensitive)

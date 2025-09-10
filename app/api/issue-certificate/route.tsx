@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerClient } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/server"
 import { generateVisualCertificatePDF } from "@/lib/visual-certificate-generator"
 import QRCode from "qrcode"
 import nodemailer from "nodemailer"
@@ -80,7 +80,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = createServerClient()
+  const supabase = createClient()
   let issuedCertificateData: any = null
 
   try {

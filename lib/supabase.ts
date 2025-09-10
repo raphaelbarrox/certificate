@@ -8,11 +8,6 @@ supabase.auth.onAuthStateChange((event, session) => {
   console.log("[v0] Auth state changed:", event, session?.user?.id)
 })
 
-export const createServerClient = async () => {
-  const { createClient: createServerClientFn } = await import("./supabase/server")
-  return createServerClientFn()
-}
-
 // Tipos do banco de dados
 export type Database = {
   public: {
