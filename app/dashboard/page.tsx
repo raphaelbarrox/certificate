@@ -32,7 +32,10 @@ export default function DashboardPage() {
 
     try {
       setLoading(true)
+      console.log("[v0] Carregando stats do dashboard para user:", user.id)
       const dashboardStats = await dashboardQueries.getDashboardStats(user.id)
+      console.log("[v0] Stats retornadas:", dashboardStats)
+      console.log("[v0] thisMonthCertificates:", dashboardStats.thisMonthCertificates)
       setStats(dashboardStats)
     } catch (error) {
       console.error("Error loading stats:", error)

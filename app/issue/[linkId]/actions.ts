@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase"
 import { revalidatePath } from "next/cache"
 import { generateCertificatePDF } from "@/lib/certificate-generator"
+import { PDFCache } from "@/lib/pdf-cache"
 
 export interface CertificateTemplate {
   id: string
@@ -36,6 +37,8 @@ export async function generateAndSaveCertificate(
   const recipientData: Record<string, any> = {}
 
   try {
+    const cachedPDF = PDFCache.get(templateId, recipientData)
+
     const imageUploads: Promise<{ fieldId: string; url?: string; error?: string }>[] = []
     const regularFields: { fieldId: string; value: any }[] = []
 
@@ -121,8 +124,18 @@ export async function generateAndSaveCertificate(
 
     // 5. Generate, upload, and save PDF URL
     try {
-      const pdf = generateCertificatePDF(template, recipientData)
-      const pdfBytes = pdf.output("arraybuffer")
+      let pdfBytes: ArrayBuffer
+
+      if (cachedPDF) {
+        console.log("[PDF Cache] Using cached PDF for template:", templateId)
+        pdfBytes = cachedPDF
+      } else {
+        const pdf = generateCertificatePDF(template, recipientData)
+        pdfBytes = pdf.output("arraybuffer")
+
+        PDFCache.set(templateId, recipientData, pdfBytes)
+      }
+
       const pdfPath = `public/${issuedCert.id}.pdf`
 
       const { error: uploadPdfError } = await supabase.storage

@@ -29,7 +29,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
-import { dashboardQueries, type DashboardStats, type ChartData } from "@/lib/dashboard-queries"
+import DashboardQueries, { type DashboardStats, type ChartData } from "@/lib/dashboard-queries"
 
 // --- TYPE DEFINITIONS ---
 interface Template {
@@ -198,6 +198,7 @@ export default function CertificatesPage() {
     setLoading(true)
 
     try {
+      const dashboardQueries = new DashboardQueries()
       const {
         stats: statsData,
         chartData: chartResult,
@@ -263,6 +264,7 @@ export default function CertificatesPage() {
     setCertificatesLoading(true)
 
     try {
+      const dashboardQueries = new DashboardQueries()
       const result = await dashboardQueries.getCertificatesPaginated(
         user.id,
         currentPage,
@@ -296,7 +298,7 @@ export default function CertificatesPage() {
 
   useEffect(() => {
     setCurrentPage(1)
-    dashboardQueries.clearCertificatesCache()
+    // O cache já é invalidado automaticamente quando necessário
   }, [debouncedSearchTerm, selectedTemplate])
 
   const handleExport = () => {

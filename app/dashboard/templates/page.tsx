@@ -31,9 +31,12 @@ import { useToast } from "@/hooks/use-toast"
 import DashboardLayout from "@/components/dashboard-layout"
 import CreateFolderDialog from "@/components/create-folder-dialog"
 import { generatePublicLinkId } from "@/lib/certificate-generator"
+import { dashboardQueries } from "@/lib/dashboard-queries"
 
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+const TEMPLATES_PER_PAGE = 10
+
+const useDebounce = (value: any, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value)
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -48,43 +51,11 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
-function useSessionStorage<T>(key: string, initialValue: T) {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    if (typeof window === "undefined") return initialValue
-    try {
-      const item = window.sessionStorage.getItem(key)
-      return item ? JSON.parse(item) : initialValue
-    } catch (error) {
-      console.warn(`Error reading sessionStorage key "${key}":`, error)
-      return initialValue
-    }
-  })
-
-  const setValue = useCallback(
-    (value: T | ((val: T) => T)) => {
-      try {
-        const valueToStore = value instanceof Function ? value(storedValue) : value
-        setStoredValue(valueToStore)
-        if (typeof window !== "undefined") {
-          window.sessionStorage.setItem(key, JSON.stringify(valueToStore))
-        }
-      } catch (error) {
-        console.warn(`Error setting sessionStorage key "${key}":`, error)
-      }
-    },
-    [key, storedValue],
-  )
-
-  return [storedValue, setValue] as const
-}
-
-const TEMPLATES_PER_PAGE = 10
-
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([])
   const [folders, setFolders] = useState<any[]>([])
   const [currentFolder, setCurrentFolder] = useState<any>(null)
-  const [view, setView] = useSessionStorage<"grid" | "list">("templates-view", "grid")
+  const [view, setView] = useState<"grid" | "list">("grid")
   const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [loadingFolders, setLoadingFolders] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -92,7 +63,6 @@ export default function TemplatesPage() {
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false)
   const [foldersEnabled, setFoldersEnabled] = useState(false)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
-  const [templatesCache, setTemplatesCache] = useState<Map<string, { data: any[]; timestamp: number }>>(new Map())
 
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -102,84 +72,29 @@ export default function TemplatesPage() {
   const { toast } = useToast()
   const { user } = useAuth()
 
-  const CACHE_TTL = 5 * 60 * 1000
-
-  const isCacheValid = useCallback(
-    (cacheKey: string) => {
-      const cached = templatesCache.get(cacheKey)
-      if (!cached) return false
-      return Date.now() - cached.timestamp < CACHE_TTL
-    },
-    [templatesCache],
-  )
-
   const fetchTemplates = useCallback(
     async (userId: string, folderId: string | null, page = 1, forceRefresh = false) => {
-      const cacheKey = `${folderId || "root"}-page-${page}`
-
-      if (!forceRefresh && isCacheValid(cacheKey)) {
-        const cached = templatesCache.get(cacheKey)
-        if (cached) {
-          setTemplates(cached.data)
-          setLoadingTemplates(false)
-          return
-        }
-      }
-
       setLoadingTemplates(true)
       try {
         console.log("[v0] Fetching templates for folder:", folderId, "page:", page)
 
-        const countQuery = supabase
-          .from("certificate_templates")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", userId)
+        const result = await dashboardQueries.getTemplatesPaginated(
+          userId,
+          folderId,
+          page,
+          TEMPLATES_PER_PAGE,
+          debouncedSearchTerm,
+        )
 
-        if (folderId) {
-          countQuery.eq("folder_id", folderId)
-        } else {
-          countQuery.is("folder_id", null)
+        setTemplates(result.templates)
+        setTotalTemplates(result.total)
+        setTotalPages(result.totalPages)
+
+        if (page < result.totalPages) {
+          dashboardQueries.preloadNextPage(userId, folderId, page, TEMPLATES_PER_PAGE, debouncedSearchTerm)
         }
 
-        if (debouncedSearchTerm) {
-          countQuery.ilike("title", `%${debouncedSearchTerm}%`)
-        }
-
-        const { count } = await countQuery
-        const total = count || 0
-        setTotalTemplates(total)
-        setTotalPages(Math.ceil(total / TEMPLATES_PER_PAGE))
-
-        const templatesQuery = supabase
-          .from("certificate_templates")
-          .select("*")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .range((page - 1) * TEMPLATES_PER_PAGE, page * TEMPLATES_PER_PAGE - 1)
-
-        if (folderId) {
-          templatesQuery.eq("folder_id", folderId)
-        } else {
-          templatesQuery.is("folder_id", null)
-        }
-
-        if (debouncedSearchTerm) {
-          templatesQuery.ilike("title", `%${debouncedSearchTerm}%`)
-        }
-
-        const templatesRes = await templatesQuery
-        if (templatesRes.error) throw templatesRes.error
-
-        const fetchedTemplates = templatesRes.data || []
-        setTemplates(fetchedTemplates)
-
-        setTemplatesCache((prev) => {
-          const newCache = new Map(prev)
-          newCache.set(cacheKey, { data: fetchedTemplates, timestamp: Date.now() })
-          return newCache
-        })
-
-        console.log("[v0] Templates loaded:", fetchedTemplates.length, "of", total)
+        console.log("[v0] Templates loaded:", result.templates.length, "of", result.total)
       } catch (error) {
         console.error("[v0] Error loading templates:", error)
         toast({
@@ -191,44 +106,31 @@ export default function TemplatesPage() {
         setLoadingTemplates(false)
       }
     },
-    [supabase, toast, isCacheValid, templatesCache, debouncedSearchTerm],
+    [debouncedSearchTerm, toast],
   )
 
   const fetchFolders = useCallback(
     async (userId: string) => {
-      if (folders.length > 0) return // Já carregadas
+      if (folders.length > 0) return
 
       setLoadingFolders(true)
       try {
         console.log("[v0] Fetching folders for user:", userId)
 
-        const foldersRes = await supabase
-          .from("folders")
-          .select("*")
-          .eq("user_id", userId)
-          .order("name", { ascending: true })
+        const result = await dashboardQueries.getFoldersWithCache(userId)
+        setFolders(result.folders)
+        setFoldersEnabled(result.foldersEnabled)
 
-        if (foldersRes.error) {
-          if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
-            setFoldersEnabled(false)
-            setFolders([])
-          } else {
-            throw foldersRes.error
-          }
-        } else {
-          setFolders(foldersRes.data || [])
-          setFoldersEnabled(true)
-          console.log("[v0] Folders loaded:", foldersRes.data?.length || 0)
-        }
-      } catch (folderError) {
-        console.warn("[v0] Could not fetch folders:", folderError)
+        console.log("[v0] Folders loaded:", result.folders.length)
+      } catch (error) {
+        console.warn("[v0] Could not fetch folders:", error)
         setFoldersEnabled(false)
         setFolders([])
       } finally {
         setLoadingFolders(false)
       }
     },
-    [supabase, folders],
+    [folders],
   )
 
   useEffect(() => {
@@ -238,11 +140,10 @@ export default function TemplatesPage() {
 
     fetchTemplates(user.id, currentFolder?.id || null, currentPage)
 
-    // Carregar pastas apenas se não estiver em uma pasta específica
     if (!currentFolder) {
       fetchFolders(user.id)
     }
-  }, [user?.id, currentFolder, currentPage]) // Adicionando currentPage às dependências
+  }, [user?.id, currentFolder, currentPage])
 
   useEffect(() => {
     setCurrentPage(1)
@@ -265,7 +166,7 @@ export default function TemplatesPage() {
         const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
         if (error) throw error
 
-        setTemplatesCache(new Map())
+        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
         fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({ title: "Template duplicado!" })
@@ -300,19 +201,12 @@ export default function TemplatesPage() {
         const updatedTemplates = templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t))
         setTemplates(updatedTemplates)
 
-        const cacheKey = `${currentFolder?.id || "root"}-page-${currentPage}`
-        setTemplatesCache((prev) => {
-          const newCache = new Map(prev)
-          newCache.set(cacheKey, { data: updatedTemplates, timestamp: Date.now() })
-          return newCache
-        })
-
         toast({ title: "Status atualizado" })
       } catch (error) {
         toast({ title: "Erro ao atualizar status", variant: "destructive" })
       }
     },
-    [templates, currentFolder, currentPage, toast, supabase],
+    [templates, toast, supabase],
   )
 
   const deleteTemplate = useCallback(
@@ -322,7 +216,7 @@ export default function TemplatesPage() {
         const { error } = await supabase.from("certificate_templates").delete().eq("id", templateId)
         if (error) throw error
 
-        setTemplatesCache(new Map())
+        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
         fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({ title: "Template excluído" })
@@ -342,7 +236,6 @@ export default function TemplatesPage() {
       return
 
     try {
-      // First, move all templates in this folder to root (folder_id = null)
       const { error: moveError } = await supabase
         .from("certificate_templates")
         .update({ folder_id: null })
@@ -350,18 +243,12 @@ export default function TemplatesPage() {
 
       if (moveError) throw moveError
 
-      // Then delete the folder
       const { error: deleteError } = await supabase.from("folders").delete().eq("id", folderId)
 
       if (deleteError) throw deleteError
 
       setFolders(folders.filter((f) => f.id !== folderId))
-      setTemplatesCache((prev) => {
-        const newCache = new Map(prev)
-        newCache.delete(folderId) // Remove cache da pasta deletada
-        newCache.delete("root") // Invalida cache da raiz pois templates foram movidos
-        return newCache
-      })
+      dashboardQueries.invalidateFoldersCache(user!.id)
 
       toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
     } catch (error) {
@@ -385,7 +272,8 @@ export default function TemplatesPage() {
 
         if (error) throw error
 
-        setTemplatesCache(new Map())
+        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
+        dashboardQueries.invalidateTemplatesCache(user!.id, folderId)
         fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({
@@ -552,14 +440,14 @@ export default function TemplatesPage() {
     console.log("[v0] Navigating to folder:", folder.name)
     setCurrentFolder(folder)
     setSearchTerm("")
-    setCurrentPage(1) // Reset página ao navegar para pasta
+    setCurrentPage(1)
   }, [])
 
   const handleBackToRoot = useCallback(() => {
     console.log("[v0] Navigating back to root")
     setCurrentFolder(null)
     setSearchTerm("")
-    setCurrentPage(1) // Reset página ao voltar para raiz
+    setCurrentPage(1)
   }, [])
 
   return (

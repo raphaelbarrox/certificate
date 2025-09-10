@@ -1,20 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateVisualCertificatePDF } from "@/lib/visual-certificate-generator"
-import QRCode from "qrcode"
 import nodemailer from "nodemailer"
+import { ImageCache } from "@/lib/image-cache"
+import { PDFCache } from "@/lib/pdf-cache"
+import { QRCodeCache } from "@/lib/qrcode-cache"
 
 async function imageUrlToDataUrl(url: string): Promise<string> {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`Falha ao buscar imagem: ${response.statusText}`)
-    const contentType = response.headers.get("content-type") || "image/jpeg"
-    const buffer = Buffer.from(await response.arrayBuffer())
-    return `data:${contentType};base64,${buffer.toString("base64")}`
-  } catch (error) {
-    console.error(`Não foi possível converter a URL da imagem para data URL: ${url}`, error)
-    return ""
-  }
+  return ImageCache.getImageDataUrl(url)
 }
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
@@ -94,6 +87,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const cachedPDF = PDFCache.get(template_id, recipient_data)
+    if (cachedPDF && !certificate_number_to_update) {
+      console.log("[PDF Cache] Using cached PDF for template:", template_id)
+      // Skip to database operations with cached PDF
+    }
+
     const { data: template, error: templateError } = await supabase
       .from("certificate_templates")
       .select(`*`)
@@ -116,13 +115,22 @@ export async function POST(request: NextRequest) {
       (el: any) => el.type === "image-placeholder" && el.placeholderId,
     )
 
-    for (const placeholder of imagePlaceholders) {
+    const imagePromises = imagePlaceholders.map(async (placeholder: any) => {
       const imageUrl = processedRecipientData[placeholder.placeholderId]
       if (imageUrl && typeof imageUrl === "string" && imageUrl.startsWith("http")) {
         const dataUrl = await imageUrlToDataUrl(imageUrl)
-        if (dataUrl) processedRecipientData[placeholder.placeholderId] = dataUrl
+        return { placeholderId: placeholder.placeholderId, dataUrl }
       }
-    }
+      return null
+    })
+
+    const imageResults = await Promise.allSettled(imagePromises)
+    imageResults.forEach((result) => {
+      if (result.status === "fulfilled" && result.value) {
+        const { placeholderId, dataUrl } = result.value
+        if (dataUrl) processedRecipientData[placeholderId] = dataUrl
+      }
+    })
 
     const canvasWidth = templateData.canvasSize?.width || templateData.canvas_width || 1200
     const canvasHeight = templateData.canvasSize?.height || templateData.canvas_height || 850
@@ -140,15 +148,28 @@ export async function POST(request: NextRequest) {
       certificate_number_to_update || `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
 
     const verificationUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/certificates/${certificateNumber}`
+
     let qrCodeDataUrl = ""
     try {
-      qrCodeDataUrl = await QRCode.toDataURL(verificationUrl, { errorCorrectionLevel: "H", margin: 2, width: 256 })
+      qrCodeDataUrl = await QRCodeCache.getQRCodeDataUrl(verificationUrl, {
+        errorCorrectionLevel: "H",
+        margin: 2,
+        width: 256,
+      })
     } catch (qrError) {
       console.error("Erro ao gerar QR Code:", qrError)
     }
 
-    const pdf = generateVisualCertificatePDF(templateForPdf, processedRecipientData, qrCodeDataUrl, certificateNumber)
-    const pdfBytes = pdf.output("arraybuffer")
+    let pdfBytes: ArrayBuffer
+    if (cachedPDF && !certificate_number_to_update) {
+      pdfBytes = cachedPDF
+    } else {
+      const pdf = generateVisualCertificatePDF(templateForPdf, processedRecipientData, qrCodeDataUrl, certificateNumber)
+      pdfBytes = pdf.output("arraybuffer")
+
+      PDFCache.set(template_id, recipient_data, pdfBytes)
+    }
+
     const pdfFileName = `certificado-${certificateNumber}.pdf`
     const pdfFilePath = `public/${pdfFileName}`
 

@@ -12,6 +12,7 @@ import { Loader2, X, ImageIcon } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import useLocalStorage from "@/hooks/use-local-storage"
 import { getMaskedValue, unmask } from "@/lib/masks"
+import { ImageOptimizer } from "@/lib/image-optimizer"
 
 interface FormField {
   id: string
@@ -144,21 +145,31 @@ export function CertificateIssueForm({
 
     const field = fields.find((f) => f.id === fieldId)
     if (field?.type === "image") {
-      if (!file.type.startsWith("image/")) {
-        setError("Por favor, envie apenas arquivos de imagem.")
+      const validation = ImageOptimizer.validateImageFile(file)
+      if (!validation.valid) {
+        setError(validation.error || "Arquivo inválido")
         return
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setError("A imagem deve ter no máximo 5MB.")
-        return
-      }
-      const reader = new FileReader()
-      reader.onload = (e) => setUploadPreviews((prev) => ({ ...prev, [fieldId]: e.target?.result as string }))
-      reader.readAsDataURL(file)
-    }
 
-    setUploadedFiles((prev) => ({ ...prev, [fieldId]: file }))
-    handleInputChange(fieldId, file.name)
+      try {
+        const compressedFile = await ImageOptimizer.compressImage(file, {
+          maxWidth: 1200,
+          maxHeight: 800,
+          quality: 0.85,
+          format: "jpeg",
+        })
+
+        const reader = new FileReader()
+        reader.onload = (e) => setUploadPreviews((prev) => ({ ...prev, [fieldId]: e.target?.result as string }))
+        reader.readAsDataURL(compressedFile)
+
+        setUploadedFiles((prev) => ({ ...prev, [fieldId]: compressedFile }))
+        handleInputChange(fieldId, compressedFile.name)
+      } catch (compressionError) {
+        setError("Erro ao processar imagem. Tente novamente.")
+        return
+      }
+    }
   }
 
   const uploadFile = async (file: File, fieldId: string): Promise<string | null> => {
@@ -166,6 +177,7 @@ export function CertificateIssueForm({
       const fileExt = file.name.split(".").pop()
       const fileName = `${Date.now()}-${fieldId}.${fileExt}`
       const filePath = `certificates/${fileName}`
+
       const { error: uploadError } = await supabase.storage.from("certificate-images").upload(filePath, file)
       if (uploadError) {
         console.error("Upload error:", uploadError)
@@ -193,13 +205,24 @@ export function CertificateIssueForm({
 
       const finalFormData = { ...formData }
 
-      for (const [fieldId, file] of Object.entries(uploadedFiles)) {
+      const uploadPromises = Object.entries(uploadedFiles).map(async ([fieldId, file]) => {
         const url = await uploadFile(file, fieldId)
-        if (url) {
-          finalFormData[fieldId] = url
+        return { fieldId, url }
+      })
+
+      const uploadResults = await Promise.allSettled(uploadPromises)
+
+      for (const result of uploadResults) {
+        if (result.status === "fulfilled") {
+          const { fieldId, url } = result.value
+          if (url) {
+            finalFormData[fieldId] = url
+          } else {
+            const fieldLabel = fields.find((f) => f.id === fieldId)?.label || fieldId
+            throw new Error(`Falha ao enviar o arquivo para o campo "${fieldLabel}". Tente novamente.`)
+          }
         } else {
-          const fieldLabel = fields.find((f) => f.id === fieldId)?.label || fieldId
-          throw new Error(`Falha ao enviar o arquivo para o campo "${fieldLabel}". Tente novamente.`)
+          throw new Error(`Erro no upload: ${result.reason}`)
         }
       }
 
@@ -356,7 +379,7 @@ export function CertificateIssueForm({
                   <p className="mb-2 text-sm text-gray-500">
                     <span className="font-semibold">Clique para enviar</span> ou arraste
                   </p>
-                  <p className="text-xs text-gray-500">PNG, JPG até 5MB</p>
+                  <p className="text-xs text-gray-500">PNG, JPG até 2MB</p>
                 </div>
                 <input
                   id={field.id}
