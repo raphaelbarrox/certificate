@@ -3,11 +3,6 @@ import { createClient } from "./supabase/client"
 // Cliente principal usando SSR
 export const supabase = createClient()
 
-// Listener para mudanças de autenticação
-supabase.auth.onAuthStateChange((event, session) => {
-  console.log("[v0] Auth state changed:", event, session?.user?.id)
-})
-
 // Tipos do banco de dados
 export type Database = {
   public: {

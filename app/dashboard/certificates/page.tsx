@@ -183,28 +183,72 @@ export default function CertificatesPage() {
   const [certificates, setCertificates] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [certificatesLoading, setCertificatesLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedTemplate, setSelectedTemplate] = useState("all")
-  const [debouncedSearchTerm] = useDebounce(searchTerm, 500)
+  const [debouncedSearchTerm] = useDebounce(searchTerm, 800)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCertificates, setTotalCertificates] = useState(0)
 
-  const fetchData = useCallback(async () => {
+  const fetchInitialData = useCallback(async () => {
     if (!user) return
+
+    console.log("[v0] Carregando dados iniciais do dashboard")
     setLoading(true)
 
     try {
-      // Carregar estatísticas e dados do gráfico em paralelo
-      const [dashboardStats, chartDataResult, templatesResult] = await Promise.all([
-        dashboardQueries.getDashboardStats(user.id),
-        dashboardQueries.getChartData(user.id),
-        dashboardQueries.getTemplatesWithCache(user.id),
-      ])
+      const {
+        stats: statsData,
+        chartData: chartResult,
+        templates: templatesData,
+      } = await dashboardQueries.getDashboardDataConsolidated(user.id)
 
-      setStats(dashboardStats)
-      setChartData(chartDataResult)
-      setTemplates(templatesResult)
+      if (statsData) {
+        const todayCount = statsData.today_count || 0
+        const yesterdayCount = statsData.yesterday_count || 0
+        const change =
+          yesterdayCount > 0 ? ((todayCount - yesterdayCount) / yesterdayCount) * 100 : todayCount > 0 ? 100 : 0
+
+        setStats({
+          today: todayCount,
+          change,
+          last7days: statsData.last7days_count || 0,
+          totalCertificates: statsData.total_certificates || 0,
+          totalTemplates: statsData.total_templates || 0,
+        })
+      }
+
+      if (chartResult) {
+        const now = new Date()
+        const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+        const countsByDay = new Map<string, number>()
+
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(todayUTC)
+          d.setUTCDate(todayUTC.getUTCDate() - i)
+          const day = String(d.getUTCDate()).padStart(2, "0")
+          const month = String(d.getUTCMonth() + 1).padStart(2, "0")
+          countsByDay.set(`${day}/${month}`, 0)
+        }
+
+        chartResult.forEach((item: any) => {
+          const date = new Date(item.date)
+          const day = String(date.getUTCDate()).padStart(2, "0")
+          const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+          const dateKey = `${day}/${month}`
+          countsByDay.set(dateKey, item.count)
+        })
+
+        setChartData(
+          Array.from(countsByDay.entries())
+            .map(([date, count]) => ({ date, Certificados: count }))
+            .reverse(),
+        )
+      }
+
+      setTemplates(templatesData || [])
+      console.log("[v0] Dados iniciais carregados com sucesso")
     } catch (error) {
       console.error("Error fetching dashboard data:", error)
     } finally {
@@ -214,6 +258,9 @@ export default function CertificatesPage() {
 
   const fetchCertificates = useCallback(async () => {
     if (!user) return
+
+    console.log("[v0] Carregando certificados paginados")
+    setCertificatesLoading(true)
 
     try {
       const result = await dashboardQueries.getCertificatesPaginated(
@@ -227,22 +274,29 @@ export default function CertificatesPage() {
       setCertificates(result.certificates)
       setTotalPages(result.totalPages)
       setTotalCertificates(result.total)
+      console.log("[v0] Certificados carregados:", result.certificates.length)
     } catch (error) {
       console.error("Error fetching certificates:", error)
+    } finally {
+      setCertificatesLoading(false)
     }
   }, [user, currentPage, debouncedSearchTerm, selectedTemplate])
 
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    if (user?.id) {
+      fetchInitialData()
+    }
+  }, [user])
 
   useEffect(() => {
-    fetchCertificates()
+    if (user?.id) {
+      fetchCertificates()
+    }
   }, [fetchCertificates])
 
-  // Reset page when search or filter changes
   useEffect(() => {
     setCurrentPage(1)
+    dashboardQueries.clearCertificatesCache()
   }, [debouncedSearchTerm, selectedTemplate])
 
   const handleExport = () => {
@@ -380,7 +434,7 @@ export default function CertificatesPage() {
                 />
               </div>
 
-              {loading ? (
+              {certificatesLoading ? (
                 <div className="space-y-2">
                   <div className="h-10 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
                   <div className="h-10 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>

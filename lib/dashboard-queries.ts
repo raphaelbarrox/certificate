@@ -14,7 +14,12 @@ export interface ChartData {
 }
 
 export class DashboardQueries {
-  private supabase = createClient()
+  private static certificatesCache = new Map<string, { data: any; timestamp: number }>()
+  private static CACHE_TTL = 2 * 60 * 1000 // 2 minutos
+
+  private get supabase() {
+    return createClient()
+  }
 
   async getDashboardStats(userId: string): Promise<DashboardStats> {
     const now = new Date()
@@ -94,6 +99,14 @@ export class DashboardQueries {
   }
 
   async getCertificatesPaginated(userId: string, page = 1, pageSize = 10, searchTerm?: string, templateId?: string) {
+    const cacheKey = `${userId}-${page}-${pageSize}-${searchTerm || ""}-${templateId || ""}`
+    const cached = DashboardQueries.certificatesCache.get(cacheKey)
+
+    if (cached && Date.now() - cached.timestamp < DashboardQueries.CACHE_TTL) {
+      console.log("[v0] Cache hit para certificados paginados")
+      return cached.data
+    }
+
     let query = this.supabase
       .from("issued_certificates")
       .select(
@@ -110,7 +123,6 @@ export class DashboardQueries {
       .eq("certificate_templates.user_id", userId)
       .order("issued_at", { ascending: false })
 
-    // Filtros opcionais
     if (templateId && templateId !== "all") {
       query = query.eq("template_id", templateId)
     }
@@ -118,7 +130,7 @@ export class DashboardQueries {
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase()
       query = query.or(
-        `certificate_number.ilike.%${searchLower}%,recipient_email.ilike.%${searchLower}%,recipient_data->>name.ilike.%${searchLower}%`,
+        `certificate_number.ilike.%${searchLower}%,recipient_email.ilike.%${searchLower}%,recipient_data->>name.ilike.%${searchLower}%,recipient_data->>nome_completo.ilike.%${searchLower}%`,
       )
     }
 
@@ -133,10 +145,51 @@ export class DashboardQueries {
       throw error
     }
 
-    return {
+    const result = {
       certificates: data || [],
       total: count || 0,
       totalPages: Math.ceil((count || 0) / pageSize),
+    }
+
+    DashboardQueries.certificatesCache.set(cacheKey, {
+      data: result,
+      timestamp: Date.now(),
+    })
+
+    return result
+  }
+
+  static clearCertificatesCache() {
+    DashboardQueries.certificatesCache.clear()
+  }
+
+  async getDashboardDataConsolidated(userId: string) {
+    const now = new Date()
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    const yesterdayUTC = new Date(todayUTC)
+    yesterdayUTC.setUTCDate(todayUTC.getUTCDate() - 1)
+    const sevenDaysAgoUTC = new Date(todayUTC)
+    sevenDaysAgoUTC.setUTCDate(todayUTC.getUTCDate() - 6)
+
+    const [statsResult, chartResult, templatesResult] = await Promise.allSettled([
+      this.supabase.rpc("get_dashboard_stats", {
+        p_user_id: userId,
+        p_today: todayUTC.toISOString(),
+        p_yesterday: yesterdayUTC.toISOString(),
+        p_seven_days_ago: sevenDaysAgoUTC.toISOString(),
+      }),
+      this.supabase.rpc("get_chart_data", {
+        p_user_id: userId,
+        p_start_date: sevenDaysAgoUTC.toISOString(),
+        p_end_date: todayUTC.toISOString(),
+      }),
+      this.getTemplatesWithCache(userId),
+    ])
+
+    return {
+      stats: statsResult.status === "fulfilled" ? statsResult.value.data?.[0] : null,
+      chartData: chartResult.status === "fulfilled" ? chartResult.value.data : [],
+      templates: templatesResult.status === "fulfilled" ? templatesResult.value : [],
     }
   }
 

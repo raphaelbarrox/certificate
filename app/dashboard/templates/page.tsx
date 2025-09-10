@@ -22,6 +22,7 @@ import {
   ChevronRight,
   LinkIcon,
   FileText,
+  ChevronLeft,
 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { supabase } from "@/lib/supabase"
@@ -77,51 +78,93 @@ function useSessionStorage<T>(key: string, initialValue: T) {
   return [storedValue, setValue] as const
 }
 
+const TEMPLATES_PER_PAGE = 10
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([])
   const [folders, setFolders] = useState<any[]>([])
   const [currentFolder, setCurrentFolder] = useState<any>(null)
   const [view, setView] = useSessionStorage<"grid" | "list">("templates-view", "grid")
-  const [loading, setLoading] = useState(true)
+  const [loadingTemplates, setLoadingTemplates] = useState(true)
+  const [loadingFolders, setLoadingFolders] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
-  const debouncedSearchTerm = useDebounce(searchTerm, 300)
+  const debouncedSearchTerm = useDebounce(searchTerm, 500)
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false)
   const [foldersEnabled, setFoldersEnabled] = useState(false)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
-  const [templatesCache, setTemplatesCache] = useState<Map<string, any[]>>(new Map())
+  const [templatesCache, setTemplatesCache] = useState<Map<string, { data: any[]; timestamp: number }>>(new Map())
+
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalTemplates, setTotalTemplates] = useState(0)
 
   const router = useRouter()
   const { toast } = useToast()
   const { user } = useAuth()
 
-  const fetchData = useCallback(
-    async (userId: string, forceRefresh = false) => {
-      const cacheKey = currentFolder ? currentFolder.id : "root"
+  const CACHE_TTL = 5 * 60 * 1000
 
-      // Check cache first unless force refresh
-      if (!forceRefresh && templatesCache.has(cacheKey)) {
-        setTemplates(templatesCache.get(cacheKey) || [])
-        setLoading(false)
-        return
+  const isCacheValid = useCallback(
+    (cacheKey: string) => {
+      const cached = templatesCache.get(cacheKey)
+      if (!cached) return false
+      return Date.now() - cached.timestamp < CACHE_TTL
+    },
+    [templatesCache],
+  )
+
+  const fetchTemplates = useCallback(
+    async (userId: string, folderId: string | null, page = 1, forceRefresh = false) => {
+      const cacheKey = `${folderId || "root"}-page-${page}`
+
+      if (!forceRefresh && isCacheValid(cacheKey)) {
+        const cached = templatesCache.get(cacheKey)
+        if (cached) {
+          setTemplates(cached.data)
+          setLoadingTemplates(false)
+          return
+        }
       }
 
-      setLoading(true)
+      setLoadingTemplates(true)
       try {
-        // Fetch templates
+        console.log("[v0] Fetching templates for folder:", folderId, "page:", page)
+
+        const countQuery = supabase
+          .from("certificate_templates")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+
+        if (folderId) {
+          countQuery.eq("folder_id", folderId)
+        } else {
+          countQuery.is("folder_id", null)
+        }
+
+        if (debouncedSearchTerm) {
+          countQuery.ilike("title", `%${debouncedSearchTerm}%`)
+        }
+
+        const { count } = await countQuery
+        const total = count || 0
+        setTotalTemplates(total)
+        setTotalPages(Math.ceil(total / TEMPLATES_PER_PAGE))
+
         const templatesQuery = supabase
           .from("certificate_templates")
           .select("*")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
+          .range((page - 1) * TEMPLATES_PER_PAGE, page * TEMPLATES_PER_PAGE - 1)
 
-        if (currentFolder) {
-          templatesQuery.eq("folder_id", currentFolder.id)
+        if (folderId) {
+          templatesQuery.eq("folder_id", folderId)
         } else {
-          // When in root, fetch templates without a folder_id
-          const { error: folderTableError } = await supabase.from("folders").select("id").limit(1)
-          if (!folderTableError) {
-            templatesQuery.is("folder_id", null)
-          }
+          templatesQuery.is("folder_id", null)
+        }
+
+        if (debouncedSearchTerm) {
+          templatesQuery.ilike("title", `%${debouncedSearchTerm}%`)
         }
 
         const templatesRes = await templatesQuery
@@ -130,53 +173,80 @@ export default function TemplatesPage() {
         const fetchedTemplates = templatesRes.data || []
         setTemplates(fetchedTemplates)
 
-        setTemplatesCache((prev) => new Map(prev).set(cacheKey, fetchedTemplates))
+        setTemplatesCache((prev) => {
+          const newCache = new Map(prev)
+          newCache.set(cacheKey, { data: fetchedTemplates, timestamp: Date.now() })
+          return newCache
+        })
 
-        // Fetch folders, but only if not inside a folder view and not already loaded
-        if (!currentFolder && folders.length === 0) {
-          try {
-            const foldersRes = await supabase
-              .from("folders")
-              .select("*")
-              .eq("user_id", userId)
-              .order("name", { ascending: true })
-
-            if (foldersRes.error) {
-              if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
-                setFoldersEnabled(false)
-                setFolders([])
-              } else {
-                throw foldersRes.error
-              }
-            } else {
-              setFolders(foldersRes.data || [])
-              setFoldersEnabled(true)
-            }
-          } catch (folderError) {
-            console.warn("Could not fetch folders:", folderError)
-            setFoldersEnabled(false)
-            setFolders([])
-          }
-        }
+        console.log("[v0] Templates loaded:", fetchedTemplates.length, "of", total)
       } catch (error) {
-        console.error("Error loading data:", error)
+        console.error("[v0] Error loading templates:", error)
         toast({
-          title: "Erro ao carregar dados",
-          description: "Verifique se todas as tabelas do banco foram criadas corretamente.",
+          title: "Erro ao carregar templates",
+          description: "Verifique sua conexão e tente novamente.",
           variant: "destructive",
         })
       } finally {
-        setLoading(false)
+        setLoadingTemplates(false)
       }
     },
-    [currentFolder, templatesCache, folders.length, toast],
+    [supabase, toast, isCacheValid, templatesCache, debouncedSearchTerm],
+  )
+
+  const fetchFolders = useCallback(
+    async (userId: string) => {
+      if (folders.length > 0) return // Já carregadas
+
+      setLoadingFolders(true)
+      try {
+        console.log("[v0] Fetching folders for user:", userId)
+
+        const foldersRes = await supabase
+          .from("folders")
+          .select("*")
+          .eq("user_id", userId)
+          .order("name", { ascending: true })
+
+        if (foldersRes.error) {
+          if (foldersRes.error.message.includes('relation "public.folders" does not exist')) {
+            setFoldersEnabled(false)
+            setFolders([])
+          } else {
+            throw foldersRes.error
+          }
+        } else {
+          setFolders(foldersRes.data || [])
+          setFoldersEnabled(true)
+          console.log("[v0] Folders loaded:", foldersRes.data?.length || 0)
+        }
+      } catch (folderError) {
+        console.warn("[v0] Could not fetch folders:", folderError)
+        setFoldersEnabled(false)
+        setFolders([])
+      } finally {
+        setLoadingFolders(false)
+      }
+    },
+    [supabase, folders],
   )
 
   useEffect(() => {
-    if (user) {
-      fetchData(user.id)
+    if (!user?.id) return
+
+    console.log("[v0] User, folder, or page changed, fetching data")
+
+    fetchTemplates(user.id, currentFolder?.id || null, currentPage)
+
+    // Carregar pastas apenas se não estiver em uma pasta específica
+    if (!currentFolder) {
+      fetchFolders(user.id)
     }
-  }, [user, currentFolder, fetchData])
+  }, [user?.id, currentFolder, currentPage]) // Adicionando currentPage às dependências
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedSearchTerm, currentFolder])
 
   const handleDuplicate = useCallback(
     async (templateId: string) => {
@@ -195,18 +265,15 @@ export default function TemplatesPage() {
         const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
         if (error) throw error
 
-        const updatedTemplates = [data, ...templates]
-        setTemplates(updatedTemplates)
-
-        const cacheKey = currentFolder ? currentFolder.id : "root"
-        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+        setTemplatesCache(new Map())
+        fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({ title: "Template duplicado!" })
       } catch (error) {
         toast({ title: "Erro ao duplicar", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast],
+    [templates, currentFolder, currentPage, toast, supabase, user, fetchTemplates],
   )
 
   const handleCopyLink = useCallback(
@@ -233,15 +300,19 @@ export default function TemplatesPage() {
         const updatedTemplates = templates.map((t) => (t.id === templateId ? { ...t, is_active: !currentStatus } : t))
         setTemplates(updatedTemplates)
 
-        const cacheKey = currentFolder ? currentFolder.id : "root"
-        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+        const cacheKey = `${currentFolder?.id || "root"}-page-${currentPage}`
+        setTemplatesCache((prev) => {
+          const newCache = new Map(prev)
+          newCache.set(cacheKey, { data: updatedTemplates, timestamp: Date.now() })
+          return newCache
+        })
 
         toast({ title: "Status atualizado" })
       } catch (error) {
         toast({ title: "Erro ao atualizar status", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast],
+    [templates, currentFolder, currentPage, toast, supabase],
   )
 
   const deleteTemplate = useCallback(
@@ -251,18 +322,15 @@ export default function TemplatesPage() {
         const { error } = await supabase.from("certificate_templates").delete().eq("id", templateId)
         if (error) throw error
 
-        const updatedTemplates = templates.filter((t) => t.id !== templateId)
-        setTemplates(updatedTemplates)
-
-        const cacheKey = currentFolder ? currentFolder.id : "root"
-        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+        setTemplatesCache(new Map())
+        fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({ title: "Template excluído" })
       } catch (error) {
         toast({ title: "Erro ao excluir", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast],
+    [currentFolder, currentPage, toast, supabase, user, fetchTemplates],
   )
 
   const deleteFolder = async (folderId: string) => {
@@ -288,7 +356,13 @@ export default function TemplatesPage() {
       if (deleteError) throw deleteError
 
       setFolders(folders.filter((f) => f.id !== folderId))
-      setTemplatesCache(new Map())
+      setTemplatesCache((prev) => {
+        const newCache = new Map(prev)
+        newCache.delete(folderId) // Remove cache da pasta deletada
+        newCache.delete("root") // Invalida cache da raiz pois templates foram movidos
+        return newCache
+      })
+
       toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
     } catch (error) {
       toast({ title: "Erro ao excluir pasta", variant: "destructive" })
@@ -311,11 +385,8 @@ export default function TemplatesPage() {
 
         if (error) throw error
 
-        const updatedTemplates = templates.filter((t) => t.id !== templateId)
-        setTemplates(updatedTemplates)
-
-        const cacheKey = currentFolder ? currentFolder.id : "root"
-        setTemplatesCache((prev) => new Map(prev).set(cacheKey, updatedTemplates))
+        setTemplatesCache(new Map())
+        fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({
           title: "Template movido!",
@@ -325,14 +396,13 @@ export default function TemplatesPage() {
         toast({ title: "Erro ao mover template", variant: "destructive" })
       }
     },
-    [templates, currentFolder, toast],
+    [currentFolder, currentPage, toast, supabase, user, fetchTemplates],
   )
 
   const filteredItems = useMemo(() => {
     const lowerSearchTerm = debouncedSearchTerm.toLowerCase()
     const filteredFolders = foldersEnabled ? folders.filter((f) => f.name.toLowerCase().includes(lowerSearchTerm)) : []
-    const filteredTemplates = templates.filter((t) => t.title.toLowerCase().includes(lowerSearchTerm))
-    return { filteredFolders, filteredTemplates }
+    return { filteredFolders, filteredTemplates: templates }
   }, [debouncedSearchTerm, foldersEnabled, folders, templates])
 
   const { filteredFolders, filteredTemplates } = filteredItems
@@ -479,14 +549,17 @@ export default function TemplatesPage() {
   )
 
   const handleFolderNavigation = useCallback((folder: any) => {
+    console.log("[v0] Navigating to folder:", folder.name)
     setCurrentFolder(folder)
-    // Clear search when navigating to folder
     setSearchTerm("")
+    setCurrentPage(1) // Reset página ao navegar para pasta
   }, [])
 
   const handleBackToRoot = useCallback(() => {
+    console.log("[v0] Navigating back to root")
     setCurrentFolder(null)
     setSearchTerm("")
+    setCurrentPage(1) // Reset página ao voltar para raiz
   }, [])
 
   return (
@@ -496,9 +569,9 @@ export default function TemplatesPage() {
           open={isFolderDialogOpen}
           onOpenChange={setIsFolderDialogOpen}
           onFolderCreated={() => {
-            if (user) {
-              setTemplatesCache(new Map())
-              fetchData(user.id, true)
+            if (user?.id) {
+              setFolders([])
+              fetchFolders(user.id)
             }
           }}
         />
@@ -553,7 +626,7 @@ export default function TemplatesPage() {
           </div>
         </div>
 
-        {loading ? (
+        {loadingTemplates ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
             <p className="text-gray-600 mt-2">Carregando templates...</p>
@@ -563,7 +636,12 @@ export default function TemplatesPage() {
             {foldersEnabled && !currentFolder && (
               <div>
                 <h2 className="text-xl font-semibold mb-4">Pastas</h2>
-                {filteredFolders.length > 0 ? (
+                {loadingFolders ? (
+                  <div className="text-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                    <p className="text-gray-600 mt-2 text-sm">Carregando pastas...</p>
+                  </div>
+                ) : filteredFolders.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                     {filteredFolders.map((folder) => (
                       <div
@@ -620,22 +698,56 @@ export default function TemplatesPage() {
                     : "Templates"}
               </h2>
               {filteredTemplates.length > 0 ? (
-                view === "grid" ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredTemplates.map(renderTemplateCard)}
-                  </div>
-                ) : (
-                  <div className="bg-white border rounded-lg">
-                    <div className="flex items-center p-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
-                      <div className="w-16 mr-4"></div>
-                      <div className="flex-grow">Título</div>
-                      <div className="w-32">Criação</div>
-                      <div className="w-24">Status</div>
-                      <div className="w-24 text-right">Ações</div>
+                <>
+                  {view === "grid" ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredTemplates.map(renderTemplateCard)}
                     </div>
-                    {filteredTemplates.map(renderTemplateRow)}
-                  </div>
-                )
+                  ) : (
+                    <div className="bg-white border rounded-lg">
+                      <div className="flex items-center p-2 border-b bg-gray-50 text-xs text-gray-500 font-medium">
+                        <div className="w-16 mr-4"></div>
+                        <div className="flex-grow">Título</div>
+                        <div className="w-32">Criação</div>
+                        <div className="w-24">Status</div>
+                        <div className="w-24 text-right">Ações</div>
+                      </div>
+                      {filteredTemplates.map(renderTemplateRow)}
+                    </div>
+                  )}
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between space-x-2 py-4 mt-6">
+                      <div className="text-sm text-gray-700 dark:text-gray-300">
+                        Mostrando {(currentPage - 1) * TEMPLATES_PER_PAGE + 1} a{" "}
+                        {Math.min(currentPage * TEMPLATES_PER_PAGE, totalTemplates)} de {totalTemplates} templates
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => p - 1)}
+                          disabled={currentPage === 1 || loadingTemplates}
+                        >
+                          <ChevronLeft className="mr-1 h-4 w-4" />
+                          Anterior
+                        </Button>
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          Página {currentPage} de {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((p) => p + 1)}
+                          disabled={currentPage === totalPages || loadingTemplates}
+                        >
+                          Próxima
+                          <ChevronRight className="ml-1 h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-center py-12">
                   <p className="text-sm text-gray-500 mb-4">
