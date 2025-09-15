@@ -1,23 +1,28 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateVisualCertificatePDF } from "@/lib/visual-certificate-generator"
-import nodemailer from "nodemailer"
 import { ImageCache } from "@/lib/image-cache"
 import { PDFCache } from "@/lib/pdf-cache"
 import { QRCodeCache } from "@/lib/qrcode-cache"
+import { EmailService } from "@/lib/email-providers/email-service"
 
 async function imageUrlToDataUrl(url: string): Promise<string> {
   return ImageCache.getImageDataUrl(url)
 }
 
-async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
+async function sendCertificateEmail(
+  template: any,
+  recipientData: any,
+  certificateNumber: string,
+  pdfUrl: string,
+  pdfBytes: ArrayBuffer,
+) {
   const emailConfig = template.form_design?.emailConfig
   if (!emailConfig || !emailConfig.enabled) {
     console.log(`[Email] Envio desativado para o template ${template.id}.`)
     return
   }
 
-  const { smtp, senderName, senderEmail, subject, body } = emailConfig
   const recipientEmail = recipientData.default_email || recipientData.email
 
   if (!recipientEmail) {
@@ -28,22 +33,9 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   try {
     console.log(`[Email] Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
 
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      auth: {
-        user: smtp.user,
-        pass: smtp.pass,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    })
-
     // Replace placeholders
-    let finalBody = body
-    let finalSubject = subject
+    let finalBody = emailConfig.body
+    let finalSubject = emailConfig.subject
 
     const allData = {
       ...recipientData,
@@ -57,15 +49,26 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       finalSubject = finalSubject.replace(regex, allData[key])
     }
 
-    const mailOptions = {
-      from: `"${senderName || senderEmail}" <${senderEmail}>`,
+    // Prepare PDF attachment
+    const pdfAttachment = {
+      filename: `certificado-${certificateNumber}.pdf`,
+      content: Buffer.from(pdfBytes),
+      contentType: "application/pdf",
+    }
+
+    const result = await EmailService.sendEmail({
       to: recipientEmail,
       subject: finalSubject,
       html: finalBody,
-    }
+      attachments: [pdfAttachment],
+      config: emailConfig,
+    })
 
-    const info = await transporter.sendMail(mailOptions)
-    console.log(`[Email] Mensagem enviada: ${info.messageId}`)
+    if (result.success) {
+      console.log(`[Email] Mensagem enviada com sucesso. ID: ${result.messageId}`)
+    } else {
+      console.error(`[Email] Falha no envio: ${result.error}`)
+    }
   } catch (error) {
     // Log the error but do not throw, to avoid breaking the main flow
     console.error(`[Email] Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`, error)
@@ -230,7 +233,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Trigger email sending after successful DB operation, without blocking the response
-    sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url)
+    sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url, pdfBytes)
 
     return NextResponse.json(issuedCertificateData)
   } catch (error) {
