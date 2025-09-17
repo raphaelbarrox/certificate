@@ -1,18 +1,34 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
+import { certificateCheckSchema, RateLimiter } from "@/lib/security-validator"
 
 export async function POST(request: NextRequest) {
   try {
-    const { template_id, cpf, dob } = await request.json()
-
-    if (!template_id || !cpf || !dob) {
-      return NextResponse.json({ error: "ID do template, CPF e Data de Nascimento são obrigatórios" }, { status: 400 })
+    const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
+    if (!RateLimiter.isAllowed(`check_${clientIP}`, 10, 60000)) {
+      return NextResponse.json(
+        { error: "Muitas tentativas de verificação. Tente novamente em 1 minuto." },
+        { status: 429 },
+      )
     }
 
-    // Busca o certificado mais recente para o CPF, Data de Nascimento e template fornecidos
+    const rawData = await request.json()
+
+    const validationResult = certificateCheckSchema.safeParse(rawData)
+    if (!validationResult.success) {
+      console.log(`[SECURITY] Invalid certificate check blocked - IP: ${clientIP}`)
+      return NextResponse.json({ error: "Dados inválidos fornecidos" }, { status: 400 })
+    }
+
+    const { template_id, cpf, dob } = validationResult.data
+
+    console.log(
+      `[AUDIT] Certificate check - IP: ${clientIP} - Template: ${template_id} - CPF: ${cpf.substring(0, 3)}***`,
+    )
+
     const { data: certificate, error } = await supabase
       .from("issued_certificates")
-      .select("id, certificate_number, pdf_url, recipient_data") // Puxa também os dados para preencher o form
+      .select("id, certificate_number, pdf_url, recipient_data")
       .eq("template_id", template_id)
       .eq("recipient_cpf", cpf)
       .eq("recipient_dob", dob)
@@ -21,11 +37,9 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error || !certificate) {
-      // Isso é esperado se for um novo usuário, então retornamos 404.
       return NextResponse.json({ error: "Nenhum certificado encontrado." }, { status: 404 })
     }
 
-    // Retorna os dados do certificado encontrado
     return NextResponse.json(certificate)
   } catch (error) {
     console.error("Erro ao verificar certificado:", error)

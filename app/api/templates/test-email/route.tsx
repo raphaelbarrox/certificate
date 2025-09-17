@@ -1,7 +1,34 @@
 import { type NextRequest, NextResponse } from "next/server"
 import nodemailer from "nodemailer"
+import { createClient } from "@/lib/supabase/server"
+import { z } from "zod"
 
-export const runtime = "nodejs" // Force Node.js runtime
+export const runtime = "nodejs"
+
+const smtpConfigSchema = z.object({
+  smtp: z.object({
+    host: z.string().min(1, "Host SMTP é obrigatório"),
+    port: z.number().min(1).max(65535, "Porta inválida"),
+    user: z.string().min(1, "Usuário SMTP é obrigatório"),
+    pass: z.string().min(1, "Senha SMTP é obrigatória"),
+  }),
+  senderEmail: z.string().email("Email do remetente inválido"),
+  senderName: z.string().optional(),
+})
+
+async function verifyAdminAccess(request: NextRequest) {
+  const supabase = createClient()
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser()
+
+  if (error || !user) {
+    return false
+  }
+
+  return true
+}
 
 function getErrorSuggestion(errorCode?: string, errorMessage?: string): string {
   const lowerCaseMessage = errorMessage?.toLowerCase() || ""
@@ -26,29 +53,38 @@ function getErrorSuggestion(errorCode?: string, errorMessage?: string): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const hasAccess = await verifyAdminAccess(request)
+    if (!hasAccess) {
+      console.log(`[SECURITY] Unauthorized email test attempt - IP: ${request.ip}`)
+      return NextResponse.json({ error: "Acesso não autorizado" }, { status: 401 })
+    }
+
     const { action, config } = await request.json()
 
     if (!config || !config.smtp) {
       return NextResponse.json({ error: "Configuração SMTP ausente." }, { status: 400 })
     }
 
-    const { smtp, senderEmail, senderName } = config
-
-    if (!smtp.host || !smtp.port || !smtp.user || !smtp.pass) {
-      return NextResponse.json({ error: "Todos os campos SMTP são obrigatórios." }, { status: 400 })
+    const validationResult = smtpConfigSchema.safeParse(config)
+    if (!validationResult.success) {
+      console.log(`[SECURITY] Invalid SMTP config - IP: ${request.ip}`)
+      return NextResponse.json({ error: "Configuração SMTP inválida" }, { status: 400 })
     }
 
-    const transporter = nodemailer.createTransport({
+    const { smtp, senderEmail, senderName } = validationResult.data
+
+    console.log(`[AUDIT] Email test - Action: ${action} - IP: ${request.ip} - Host: ${smtp.host}`)
+
+    const transporter = nodemailer.createTransporter({
       host: smtp.host,
       port: smtp.port,
-      secure: smtp.port === 465, // Enforce direct TLS only for port 465. For other ports (like 587), this will be false, allowing nodemailer to use STARTTLS.
+      secure: smtp.port === 465,
       auth: {
         user: smtp.user,
         pass: smtp.pass,
       },
       tls: {
-        // do not fail on invalid certs
-        rejectUnauthorized: false,
+        rejectUnauthorized: true, // Melhorar segurança TLS
       },
     })
 
@@ -64,7 +100,7 @@ export async function POST(request: NextRequest) {
 
       await transporter.sendMail({
         from: `"${senderName || "Teste CertGen"}" <${senderEmail}>`,
-        to: senderEmail, // Sends test to the sender themselves
+        to: senderEmail,
         subject: "Email de Teste - CertGen",
         html: `
         <h1>Teste de Conexão SMTP</h1>
