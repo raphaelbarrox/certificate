@@ -8,17 +8,17 @@ const downloadParamsSchema = z.object({
     .string()
     .min(1, "ID é obrigatório")
     .max(100, "ID muito longo")
-    .regex(/^[a-zA-Z0-9\-_]+$/, "ID contém caracteres inválidos"),
+    .regex(/^[a-zA-Z0-9\-_{}]+$/, "ID contém caracteres inválidos"),
 })
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
     if (!RateLimiter.isAllowed(`download_${clientIP}`, 30, 60000)) {
       return NextResponse.json({ error: "Muitos downloads. Tente novamente em 1 minuto." }, { status: 429 })
     }
 
-    const { id } = await params
+    const { id } = params
 
     const validationResult = downloadParamsSchema.safeParse({ id })
     if (!validationResult.success) {
