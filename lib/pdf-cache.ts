@@ -74,6 +74,16 @@ export class PDFCache {
     return deleted
   }
 
+  static forceInvalidateForUpdate(templateId: string, recipientData: Record<string, any>): void {
+    // Invalida cache específico
+    this.invalidateSpecific(templateId, recipientData)
+
+    // Invalida todo o template para garantir
+    this.invalidateForTemplate(templateId)
+
+    console.log(`[PDF Cache] Force invalidated all cache for template ${templateId} during update`)
+  }
+
   static clear(): void {
     this.cache.clear()
     this.hits = 0
@@ -105,5 +115,30 @@ export class PDFCache {
     }
 
     return cleanedCount
+  }
+
+  static getCacheEntriesByTemplate(templateId: string): CachedPDF[] {
+    const entries: CachedPDF[] = []
+    for (const [key, value] of this.cache.entries()) {
+      if (value.templateId === templateId) {
+        entries.push(value)
+      }
+    }
+    return entries
+  }
+
+  static getMemoryUsage(): { totalSizeMB: number; averageSizeMB: number } {
+    let totalSize = 0
+    for (const [key, value] of this.cache.entries()) {
+      totalSize += value.data.byteLength
+    }
+
+    const totalSizeMB = totalSize / (1024 * 1024)
+    const averageSizeMB = this.cache.size > 0 ? totalSizeMB / this.cache.size : 0
+
+    return {
+      totalSizeMB: Math.round(totalSizeMB * 100) / 100,
+      averageSizeMB: Math.round(averageSizeMB * 100) / 100,
+    }
   }
 }

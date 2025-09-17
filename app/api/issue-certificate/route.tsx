@@ -75,6 +75,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 export async function POST(request: NextRequest) {
   const supabase = createClient()
   let issuedCertificateData: any = null
+  let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
     const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
@@ -89,13 +90,29 @@ export async function POST(request: NextRequest) {
 
     if (certificate_number_to_update) {
       console.log("[PDF Cache] Invalidating cache for certificate update:", certificate_number_to_update)
-      PDFCache.invalidateForTemplate(template_id)
+      PDFCache.forceInvalidateForUpdate(template_id, recipient_data)
+      ImageCache.invalidateForTemplate?.(template_id)
+
+      // Get old PDF path for deletion
+      const { data: existingCert } = await supabase
+        .from("issued_certificates")
+        .select("pdf_url")
+        .eq("certificate_number", certificate_number_to_update)
+        .single()
+
+      if (existingCert?.pdf_url) {
+        // Extract path from URL
+        const urlParts = existingCert.pdf_url.split("/generated-certificates/")
+        if (urlParts.length > 1) {
+          oldPdfPath = urlParts[1]
+          console.log("[Storage] Old PDF path to delete:", oldPdfPath)
+        }
+      }
     }
 
-    const cachedPDF = PDFCache.get(template_id, recipient_data)
+    const cachedPDF = certificate_number_to_update ? null : PDFCache.get(template_id, recipient_data)
     if (cachedPDF && !certificate_number_to_update) {
       console.log("[PDF Cache] Using cached PDF for template:", template_id)
-      // Skip to database operations with cached PDF
     }
 
     const { data: template, error: templateError } = await supabase
@@ -111,7 +128,7 @@ export async function POST(request: NextRequest) {
     if (certificate_number_to_update) {
       const { data: existingCertificate, error: checkError } = await supabase
         .from("issued_certificates")
-        .select("id, template_id, recipient_cpf, recipient_dob")
+        .select("id, template_id, recipient_cpf, recipient_dob, pdf_url")
         .eq("certificate_number", certificate_number_to_update)
         .eq("recipient_cpf", recipient_cpf)
         .eq("recipient_dob", recipient_dob)
@@ -128,6 +145,10 @@ export async function POST(request: NextRequest) {
       if (existingCertificate.template_id !== template_id) {
         return NextResponse.json({ error: "Template não corresponde ao certificado original" }, { status: 400 })
       }
+
+      console.log(
+        `[AUDIT] Updating certificate ${certificate_number_to_update} - Old PDF: ${existingCertificate.pdf_url}`,
+      )
     }
 
     const templateData = template.template_data || {}
@@ -201,12 +222,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const pdfFileName = `certificado-${certificateNumber}.pdf`
+    const timestamp = Date.now()
+    const pdfFileName = certificate_number_to_update
+      ? `certificado-${certificateNumber}-${timestamp}.pdf`
+      : `certificado-${certificateNumber}.pdf`
     const pdfFilePath = `public/${pdfFileName}`
 
     const { error: uploadError } = await supabase.storage
       .from("generated-certificates")
-      .upload(pdfFilePath, pdfBytes, { contentType: "application/pdf", upsert: true })
+      .upload(pdfFilePath, pdfBytes, { contentType: "application/pdf", upsert: false }) // Use upsert: false for new files
 
     if (uploadError) {
       console.error("Erro no Upload do PDF:", uploadError)
@@ -225,7 +249,6 @@ export async function POST(request: NextRequest) {
           recipient_email: recipient_data.default_email || recipient_data.email,
           photo_url: photo_url || null,
           pdf_url: pdf_url,
-          issued_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("certificate_number", certificate_number_to_update)
@@ -238,8 +261,23 @@ export async function POST(request: NextRequest) {
         console.error("Erro ao atualizar no BD:", dbError)
         throw new Error("Falha ao atualizar os dados do certificado.")
       }
+
+      if (oldPdfPath) {
+        try {
+          const { error: deleteError } = await supabase.storage.from("generated-certificates").remove([oldPdfPath])
+
+          if (deleteError) {
+            console.warn("[Storage] Failed to delete old PDF:", deleteError.message)
+          } else {
+            console.log("[Storage] Successfully deleted old PDF:", oldPdfPath)
+          }
+        } catch (deleteErr) {
+          console.warn("[Storage] Error deleting old PDF:", deleteErr)
+        }
+      }
+
       issuedCertificateData = updatedCertificate
-      console.log("[DB Update] Certificate updated successfully:", updatedCertificate.id)
+      console.log(`[AUDIT] Certificate updated successfully - ID: ${updatedCertificate.id}, New PDF: ${pdf_url}`)
     } else {
       const { data: newCertificate, error: dbError } = await supabase
         .from("issued_certificates")

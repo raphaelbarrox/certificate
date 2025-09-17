@@ -53,8 +53,39 @@ export class ImageCache {
     }
   }
 
+  static invalidateForTemplate(templateId: string): number {
+    // Para imagens, invalidamos todas já que não temos referência direta ao template
+    // Isso garante que imagens atualizadas sejam recarregadas
+    let invalidatedCount = 0
+    const now = Date.now()
+
+    // Invalida imagens mais antigas que 1 hora durante atualizações
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > 60 * 60 * 1000) {
+        // 1 hora
+        this.cache.delete(key)
+        invalidatedCount++
+      }
+    }
+
+    if (invalidatedCount > 0) {
+      console.log(`[Image Cache] Invalidated ${invalidatedCount} old entries for template update`)
+    }
+    return invalidatedCount
+  }
+
+  static invalidateUrl(url: string): boolean {
+    const deleted = this.cache.delete(url)
+    if (deleted) {
+      console.log(`[Image Cache] Invalidated specific URL: ${url}`)
+    }
+    return deleted
+  }
+
   static clear(): void {
     this.cache.clear()
+    this.hits = 0
+    this.misses = 0
   }
 
   static getStats(): { size: number; maxSize: number; hitRate: number; hits: number; misses: number } {
