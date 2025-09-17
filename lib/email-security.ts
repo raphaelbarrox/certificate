@@ -1,42 +1,80 @@
-import crypto from "crypto"
-
-const ENCRYPTION_KEY = process.env.EMAIL_ENCRYPTION_KEY
-if (!ENCRYPTION_KEY) {
-  throw new Error("EMAIL_ENCRYPTION_KEY é obrigatória para segurança do sistema")
-}
-
-const ALGORITHM = "aes-256-gcm"
+const ALGORITHM = "AES-GCM"
 
 export class EmailSecurity {
-  static encryptApiKey(apiKey: string): { encrypted: string; iv: string; tag: string } {
-    const iv = crypto.randomBytes(16)
-    const cipher = crypto.createCipherGCM(ALGORITHM, Buffer.from(ENCRYPTION_KEY, "hex"))
-    cipher.setIVLength(16)
+  private static async generateUserKey(userId: string): Promise<CryptoKey> {
+    const encoder = new TextEncoder()
+    const keyMaterial = encoder.encode(`email-security-${userId}-v1`)
 
-    let encrypted = cipher.update(apiKey, "utf8", "hex")
-    encrypted += cipher.final("hex")
+    // Gerar hash SHA-256 da chave base
+    const hashBuffer = await crypto.subtle.digest("SHA-256", keyMaterial)
 
-    const tag = cipher.getAuthTag()
+    // Importar como chave AES-GCM
+    return await crypto.subtle.importKey("raw", hashBuffer, { name: ALGORITHM }, false, ["encrypt", "decrypt"])
+  }
+
+  static async encryptApiKey(apiKey: string, userId: string): Promise<{ encrypted: string; iv: string; tag: string }> {
+    const encoder = new TextEncoder()
+    const data = encoder.encode(apiKey)
+
+    // Gerar IV aleatório
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+
+    // Gerar chave baseada no usuário
+    const key = await this.generateUserKey(userId)
+
+    // Criptografar
+    const encrypted = await crypto.subtle.encrypt({ name: ALGORITHM, iv: iv }, key, data)
+
+    // Separar dados criptografados e tag de autenticação
+    const encryptedArray = new Uint8Array(encrypted)
+    const encryptedData = encryptedArray.slice(0, -16)
+    const tag = encryptedArray.slice(-16)
 
     return {
-      encrypted,
-      iv: iv.toString("hex"),
-      tag: tag.toString("hex"),
+      encrypted: Array.from(encryptedData)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
+      iv: Array.from(iv)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
+      tag: Array.from(tag)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
     }
   }
 
-  static decryptApiKey(encryptedData: { encrypted: string; iv: string; tag: string }): string {
-    const decipher = crypto.createDecipherGCM(ALGORITHM, Buffer.from(ENCRYPTION_KEY, "hex"))
-    decipher.setAuthTag(Buffer.from(encryptedData.tag, "hex"))
+  static async decryptApiKey(
+    encryptedData: { encrypted: string; iv: string; tag: string },
+    userId: string,
+  ): Promise<string> {
+    // Converter hex strings para Uint8Array
+    const iv = new Uint8Array(encryptedData.iv.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16)))
+    const encrypted = new Uint8Array(encryptedData.encrypted.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16)))
+    const tag = new Uint8Array(encryptedData.tag.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16)))
 
-    let decrypted = decipher.update(encryptedData.encrypted, "hex", "utf8")
-    decrypted += decipher.final("utf8")
+    // Combinar dados criptografados com tag
+    const combinedData = new Uint8Array(encrypted.length + tag.length)
+    combinedData.set(encrypted)
+    combinedData.set(tag, encrypted.length)
 
-    return decrypted
+    // Gerar chave baseada no usuário
+    const key = await this.generateUserKey(userId)
+
+    // Descriptografar
+    const decrypted = await crypto.subtle.decrypt({ name: ALGORITHM, iv: iv }, key, combinedData)
+
+    const decoder = new TextDecoder()
+    return decoder.decode(decrypted)
   }
 
-  static hashApiKey(apiKey: string): string {
-    return crypto.createHash("sha256").update(apiKey).digest("hex")
+  static async hashApiKey(apiKey: string): Promise<string> {
+    const encoder = new TextEncoder()
+    const data = encoder.encode(apiKey)
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+    const hashArray = new Uint8Array(hashBuffer)
+    return Array.from(hashArray)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
   }
 
   static maskApiKey(apiKey: string): string {

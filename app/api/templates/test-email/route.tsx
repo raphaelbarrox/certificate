@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { EmailService } from "@/lib/email-providers/email-service"
+import { getDecryptedConfigAction } from "@/app/actions/email-actions"
 
 export const runtime = "nodejs"
 
@@ -29,36 +30,87 @@ function getErrorSuggestion(errorCode?: string, errorMessage?: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { action, config } = await request.json()
+    const { action, config, userId } = await request.json()
+
+    console.log("[v0] [Email Test API] 🚀 Iniciando teste:", {
+      action,
+      provider: config?.provider,
+      hasUserId: !!userId,
+    })
 
     if (!config) {
+      console.log("[v0] [Email Test API] ❌ Configuração ausente")
       return NextResponse.json({ error: "Configuração de email ausente." }, { status: 400 })
     }
 
-    const { senderEmail, senderName } = config
+    const hasSecureKey = config.resend?.keyHash
+    const hasLegacyKey = config.resend?.apiKey && config.resend.apiKey.trim() !== ""
 
-    // Forçar provider para resend
-    config.provider = "resend"
-
-    if (!config.resend?.apiKey) {
+    if (!hasSecureKey && !hasLegacyKey) {
+      console.log("[v0] [Email Test API] ❌ API Key ausente")
       return NextResponse.json(
         {
-          error: "API Key do Resend é obrigatória.",
+          error: "API Key do Resend é obrigatória. Configure e salve sua API Key primeiro.",
         },
         { status: 400 },
       )
     }
 
-    if (!config.resend.apiKey.startsWith("re_")) {
+    let finalConfig = config
+
+    if (hasSecureKey) {
+      if (!userId) {
+        console.log("[v0] [Email Test API] ❌ UserId necessário para descriptografar")
+        return NextResponse.json(
+          {
+            error: "Erro de autenticação. Faça login novamente.",
+          },
+          { status: 401 },
+        )
+      }
+
+      try {
+        console.log("[v0] [Email Test API] 🔓 Descriptografando API Key...")
+        const decryptResult = await getDecryptedConfigAction(userId, config.resend.keyHash)
+
+        if (!decryptResult.success) {
+          throw new Error(decryptResult.error)
+        }
+
+        finalConfig = {
+          ...config,
+          resend: {
+            enabled: true,
+            apiKey: decryptResult.apiKey,
+          },
+        }
+        console.log("[v0] [Email Test API] ✅ API Key descriptografada com sucesso")
+      } catch (decryptError) {
+        console.error("[v0] [Email Test API] ❌ Erro ao descriptografar:", decryptError)
+        return NextResponse.json(
+          {
+            error: "Erro ao acessar API Key. Verifique se a chave foi salva corretamente.",
+          },
+          { status: 400 },
+        )
+      }
+    }
+
+    const apiKey = finalConfig.resend?.apiKey
+    if (!apiKey || !apiKey.startsWith("re_")) {
+      console.log("[v0] [Email Test API] ❌ API Key formato inválido")
       return NextResponse.json(
         {
-          error: "API Key do Resend deve começar com 're_'. Verifique se copiou corretamente.",
+          error: "API Key do Resend deve começar com 're_'. Verifique se copiou corretamente da dashboard do Resend.",
         },
         { status: 400 },
       )
     }
 
-    if (!senderEmail) {
+    const { senderEmail, senderName } = finalConfig
+
+    if (!senderEmail || senderEmail.trim() === "") {
+      console.log("[v0] [Email Test API] ❌ Email remetente ausente")
       return NextResponse.json(
         {
           error: "Email do remetente é obrigatório para o Resend.",
@@ -67,43 +119,56 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verificar se o domínio do email parece ser personalizado
-    const emailDomain = senderEmail.split("@")[1]
-    if (["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"].includes(emailDomain)) {
+    const emailDomain = senderEmail.split("@")[1]?.toLowerCase()
+    const publicDomains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com", "icloud.com", "aol.com"]
+
+    if (publicDomains.includes(emailDomain)) {
+      console.log("[v0] [Email Test API] ❌ Domínio público detectado:", emailDomain)
       return NextResponse.json(
         {
-          error: `Resend não permite emails de provedores públicos como ${emailDomain}. Use um domínio próprio verificado no Resend.`,
+          error: `Resend não permite emails de provedores públicos como ${emailDomain}. Você precisa usar um domínio próprio verificado no Resend (ex: contato@suaempresa.com).`,
         },
         { status: 400 },
       )
     }
 
+    const emailConfig = {
+      ...finalConfig,
+      provider: "resend",
+      resend: {
+        enabled: true,
+        apiKey: apiKey,
+      },
+    }
+
     if (action === "verify") {
-      const result = await EmailService.testConnection(config)
+      console.log("[v0] [Email Test API] 🔍 Testando conexão...")
+      const result = await EmailService.testConnection(emailConfig)
 
       if (!result.success) {
         let errorMessage = result.error || "Falha na verificação"
+        console.log("[v0] [Email Test API] ❌ Falha na verificação:", errorMessage)
 
         if (errorMessage.includes("401") || errorMessage.includes("unauthorized")) {
-          errorMessage = "API Key do Resend inválida. Verifique se a chave está correta e ativa."
+          errorMessage =
+            "API Key do Resend inválida ou expirada. Verifique se a chave está correta e ativa na dashboard do Resend."
+        } else if (errorMessage.includes("403") || errorMessage.includes("forbidden")) {
+          errorMessage = "Acesso negado. Verifique se a API Key tem as permissões necessárias para enviar emails."
         } else if (errorMessage.includes("domain")) {
-          errorMessage = "Domínio não verificado no Resend. Acesse resend.com/domains para verificar seu domínio."
-        } else if (errorMessage.includes("forbidden")) {
-          errorMessage = "Email remetente não autorizado. Certifique-se de que o domínio está verificado no Resend."
+          errorMessage = `Domínio '${emailDomain}' não está verificado no Resend. Acesse https://resend.com/domains para verificar seu domínio.`
         }
 
-        throw new Error(errorMessage)
+        return NextResponse.json({ error: errorMessage }, { status: 400 })
       }
 
+      console.log("[v0] [Email Test API] ✅ Conexão verificada com sucesso")
       return NextResponse.json({
-        message: `✅ Conexão com Resend bem-sucedida! Configuração válida.`,
+        message: `✅ Conexão com Resend bem-sucedida! API Key válida e domínio '${emailDomain}' verificado.`,
       })
     }
 
     if (action === "send") {
-      if (!senderEmail) {
-        return NextResponse.json({ error: "Email do remetente é obrigatório para enviar um teste." }, { status: 400 })
-      }
+      console.log("[v0] [Email Test API] 📧 Enviando email de teste...")
 
       const result = await EmailService.sendEmail({
         to: senderEmail,
@@ -117,7 +182,10 @@ export async function POST(request: NextRequest) {
               <h3 style="margin: 0 0 10px 0; color: #374151;">📋 Detalhes da Configuração:</h3>
               <p><strong>🚀 Provedor:</strong> Resend API</p>
               <p><strong>📧 Email Remetente:</strong> ${senderEmail}</p>
+              <p><strong>👤 Nome Remetente:</strong> ${senderName || "Não definido"}</p>
+              <p><strong>🌐 Domínio:</strong> ${emailDomain}</p>
               <p><strong>✅ Status:</strong> Domínio verificado e funcionando</p>
+              <p><strong>🔐 Segurança:</strong> API Key criptografada</p>
             </div>
             
             <p style="color: #6b7280; font-size: 14px;">
@@ -125,37 +193,59 @@ export async function POST(request: NextRequest) {
             </p>
           </div>
         `,
-        config,
+        config: emailConfig,
       })
 
       if (!result.success) {
         let errorMessage = result.error || "Falha no envio do teste"
+        console.log("[v0] [Email Test API] ❌ Falha no envio:", errorMessage)
 
         if (errorMessage.includes("domain")) {
-          errorMessage =
-            "❌ Domínio não verificado no Resend. Acesse https://resend.com/domains para verificar seu domínio antes de enviar emails."
+          errorMessage = `❌ Domínio '${emailDomain}' não está verificado no Resend. Acesse https://resend.com/domains para verificar seu domínio antes de enviar emails.`
+        } else if (errorMessage.includes("rate limit")) {
+          errorMessage = "❌ Limite de envio excedido. Aguarde alguns minutos antes de tentar novamente."
         }
 
-        throw new Error(errorMessage)
+        return NextResponse.json({ error: errorMessage }, { status: 400 })
       }
 
+      console.log("[v0] [Email Test API] ✅ Email de teste enviado com sucesso")
       return NextResponse.json({
-        message: `🎉 Email de teste enviado com sucesso para ${senderEmail}! Verifique sua caixa de entrada.`,
+        message: `🎉 Email de teste enviado com sucesso para ${senderEmail}! Verifique sua caixa de entrada (e spam).`,
       })
     }
 
-    return NextResponse.json({ error: "Ação inválida." }, { status: 400 })
+    return NextResponse.json({ error: "Ação inválida. Use 'verify' ou 'send'." }, { status: 400 })
   } catch (error: any) {
-    console.error("❌ [Email Test Error]", error)
+    console.error("❌ [Email Test API Error]", error)
 
+    let errorMessage = "Erro interno do servidor"
     let suggestion = ""
-    if (error.message.includes("domain")) {
-      suggestion = "Configure seu domínio no Resend: https://resend.com/domains"
-    } else if (error.message.includes("unauthorized") || error.message.includes("401")) {
-      suggestion = "Verifique se a API Key está correta e ativa no Resend"
+
+    if (error instanceof Error) {
+      errorMessage = error.message
+
+      if (error.message.includes("domain")) {
+        suggestion = "Configure seu domínio no Resend: https://resend.com/domains"
+      } else if (error.message.includes("unauthorized") || error.message.includes("401")) {
+        suggestion = "Verifique se a API Key está correta e ativa no Resend"
+      } else if (error.message.includes("JSON")) {
+        errorMessage = "Erro ao processar dados da requisição"
+      } else if (error.message.includes("fetch")) {
+        errorMessage = "Erro de conexão com o serviço de email"
+      }
     }
 
-    const errorMessage = `❌ ${error.message}${suggestion ? ` | 💡 ${suggestion}` : ""}`
-    return NextResponse.json({ error: errorMessage }, { status: 500 })
+    const finalErrorMessage = `❌ ${errorMessage}${suggestion ? ` | 💡 ${suggestion}` : ""}`
+
+    return NextResponse.json(
+      { error: finalErrorMessage },
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
   }
 }

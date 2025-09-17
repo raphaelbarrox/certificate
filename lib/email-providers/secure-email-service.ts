@@ -31,7 +31,7 @@ export class SecureEmailService {
     }
 
     // Descriptografar a chave
-    const decryptedKey = EmailSecurity.decryptApiKey(JSON.parse(keyData.encrypted_key))
+    const decryptedKey = await EmailSecurity.decryptApiKey(JSON.parse(keyData.encrypted_key), userId)
 
     return {
       ...config,
@@ -45,8 +45,8 @@ export class SecureEmailService {
   static async saveApiKey(userId: string, provider: "resend" | "smtp", apiKey: string): Promise<string> {
     const supabase = createClient()
 
-    const keyHash = EmailSecurity.hashApiKey(apiKey)
-    const encryptedData = EmailSecurity.encryptApiKey(apiKey)
+    const keyHash = await EmailSecurity.hashApiKey(apiKey)
+    const encryptedData = await EmailSecurity.encryptApiKey(apiKey, userId)
 
     const { error } = await supabase.from("email_api_keys").upsert({
       user_id: userId,

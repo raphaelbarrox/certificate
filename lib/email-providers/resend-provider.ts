@@ -23,7 +23,15 @@ export class ResendProvider {
   private resend: Resend
 
   constructor(apiKey: string) {
-    this.resend = new Resend(apiKey)
+    if (!apiKey || apiKey.trim() === "") {
+      throw new Error("API Key do Resend é obrigatória")
+    }
+
+    if (!apiKey.startsWith("re_")) {
+      throw new Error("API Key do Resend deve começar com 're_'")
+    }
+
+    this.resend = new Resend(apiKey.trim())
   }
 
   async sendEmail(options: ResendEmailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
@@ -80,14 +88,45 @@ export class ResendProvider {
   async verifyConnection(): Promise<{ success: boolean; error?: string }> {
     try {
       console.log("[v0] [Resend] 🔍 Verificando conexão...")
-      // Resend doesn't have a direct verify method, so we'll try to get domains
-      // This is a lightweight way to test if the API key is valid
-      await this.resend.domains.list()
+
+      // Tentamos listar domínios - se der erro de autenticação, sabemos que a API Key está inválida
+      const domainsResult = await this.resend.domains.list().catch((error) => {
+        // Se o erro for de autenticação (401/403), a API Key está inválida
+        if (error.message?.includes("401") || error.message?.includes("unauthorized")) {
+          throw new Error("API Key inválida ou não autorizada")
+        }
+        // Se o erro for de permissão (403), pode ser que a API Key não tenha permissão para listar domínios
+        // mas isso não significa que não pode enviar emails
+        if (error.message?.includes("403")) {
+          console.log("[v0] [Resend] ⚠️ Sem permissão para listar domínios, mas API Key pode estar válida")
+          return { data: [] } // Assumir que está OK
+        }
+        throw error
+      })
+
       console.log("[v0] [Resend] ✅ Conexão verificada com sucesso!")
       return { success: true }
-    } catch (error) {
+    } catch (error: any) {
       console.error("[v0] [Resend] ❌ Erro na verificação:", error)
-      const errorMessage = error instanceof Error ? error.message : "Erro na verificação"
+
+      let errorMessage = "Erro na verificação da conexão"
+
+      if (
+        error.message?.includes("API key") ||
+        error.message?.includes("unauthorized") ||
+        error.message?.includes("401")
+      ) {
+        errorMessage = "API Key inválida ou não autorizada - verifique se está correta e ativa"
+      } else if (error.message?.includes("forbidden") || error.message?.includes("403")) {
+        errorMessage = "Acesso negado - verifique as permissões da API Key"
+      } else if (error.message?.includes("rate limit")) {
+        errorMessage = "Limite de taxa excedido - tente novamente em alguns minutos"
+      } else if (error.message?.includes("network") || error.message?.includes("fetch")) {
+        errorMessage = "Erro de conexão - verifique sua internet"
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+
       return { success: false, error: errorMessage }
     }
   }
