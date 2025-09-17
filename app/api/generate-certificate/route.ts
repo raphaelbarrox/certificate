@@ -1,9 +1,15 @@
-import { NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
 import { generateCertificate } from "@/lib/certificate-generator"
+import { checkRateLimit } from "@/lib/auth-utils"
 
 export async function POST(request: NextRequest) {
   try {
+    if (!checkRateLimit(request, 5, 60000)) {
+      // 5 certificados por minuto por IP
+      return NextResponse.json({ error: "Muitas tentativas. Tente novamente em alguns minutos." }, { status: 429 })
+    }
+
     const formData = await request.formData()
     const templateId = formData.get("templateId") as string
     const recipientDataStr = formData.get("recipientData") as string
@@ -30,13 +36,21 @@ export async function POST(request: NextRequest) {
 
     // Upload image if provided
     if (imageFile) {
+      const allowedTypes = ["image/jpeg", "image/png", "image/jpg"]
+      if (!allowedTypes.includes(imageFile.type)) {
+        return NextResponse.json({ error: "Tipo de arquivo não permitido. Use JPEG ou PNG." }, { status: 400 })
+      }
+
+      if (imageFile.size > 5 * 1024 * 1024) {
+        // 5MB
+        return NextResponse.json({ error: "Arquivo muito grande. Máximo 5MB." }, { status: 400 })
+      }
+
       const fileExt = imageFile.name.split(".").pop()
       const fileName = `${Date.now()}-photo.${fileExt}`
       const filePath = `certificates/${fileName}`
 
-      const { error: uploadError } = await supabase.storage
-        .from("certificate-images")
-        .upload(filePath, imageFile)
+      const { error: uploadError } = await supabase.storage.from("certificate-images").upload(filePath, imageFile)
 
       if (uploadError) {
         console.error("Upload error:", uploadError)

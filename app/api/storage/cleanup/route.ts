@@ -1,10 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { requireAuth, checkRateLimit } from "@/lib/auth-utils"
 
 export async function POST(request: NextRequest) {
-  const supabase = createClient()
-
   try {
+    const user = await requireAuth(request)
+
+    if (!checkRateLimit(request, 5, 300000)) {
+      // 5 tentativas por 5 minutos
+      return NextResponse.json({ error: "Muitas tentativas. Tente novamente em alguns minutos." }, { status: 429 })
+    }
+
+    const supabase = createClient()
     const { action } = await request.json()
 
     if (action === "check_orphaned") {
@@ -57,11 +64,11 @@ export async function POST(request: NextRequest) {
         throw new Error(`Failed to delete files: ${error.message}`)
       }
 
-      // Log cleanup operation
       await supabase.from("storage_cleanup_log").insert({
         cleanup_type: "orphaned_pdfs_removal",
-        details: `Removed ${files_to_delete.length} orphaned PDF files`,
+        details: `Removed ${files_to_delete.length} orphaned PDF files by user ${user.email}`,
         files_removed: files_to_delete.length,
+        user_id: user.id,
       })
 
       return NextResponse.json({
@@ -75,14 +82,20 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Storage cleanup error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
+
+    if (errorMessage.includes("Acesso negado")) {
+      return NextResponse.json({ error: errorMessage }, { status: 401 })
+    }
+
     return NextResponse.json({ error: errorMessage }, { status: 500 })
   }
 }
 
-export async function GET() {
-  const supabase = createClient()
-
+export async function GET(request: NextRequest) {
   try {
+    await requireAuth(request)
+
+    const supabase = createClient()
     const { data: storageStats, error } = await supabase.rpc("get_storage_usage_by_template")
 
     if (error) {
@@ -96,6 +109,11 @@ export async function GET() {
   } catch (error) {
     console.error("Storage stats error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
+
+    if (errorMessage.includes("Acesso negado")) {
+      return NextResponse.json({ error: errorMessage }, { status: 401 })
+    }
+
     return NextResponse.json({ error: errorMessage }, { status: 500 })
   }
 }

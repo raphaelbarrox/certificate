@@ -5,6 +5,7 @@ import nodemailer from "nodemailer"
 import { ImageCache } from "@/lib/image-cache"
 import { PDFCache } from "@/lib/pdf-cache"
 import { QRCodeCache } from "@/lib/qrcode-cache"
+import { checkRateLimit } from "@/lib/auth-utils"
 
 async function imageUrlToDataUrl(url: string): Promise<string> {
   return ImageCache.getImageDataUrl(url)
@@ -73,6 +74,11 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 }
 
 export async function POST(request: NextRequest) {
+  if (!checkRateLimit(request, 5, 60000)) {
+    // 5 certificados por minuto por IP
+    return NextResponse.json({ error: "Muitas tentativas. Tente novamente em alguns minutos." }, { status: 429 })
+  }
+
   const supabase = createClient()
   let issuedCertificateData: any = null
   let oldPdfPath: string | null = null // Track old PDF for deletion
@@ -86,6 +92,16 @@ export async function POST(request: NextRequest) {
         { error: "Dados do destinatário, CPF e Data de Nascimento são obrigatórios" },
         { status: 400 },
       )
+    }
+
+    const cpfRegex = /^\d{3}\.\d{3}\.\d{3}-\d{2}$|^\d{11}$/
+    if (!cpfRegex.test(recipient_cpf)) {
+      return NextResponse.json({ error: "Formato de CPF inválido" }, { status: 400 })
+    }
+
+    const dobRegex = /^\d{4}-\d{2}-\d{2}$/
+    if (!dobRegex.test(recipient_dob)) {
+      return NextResponse.json({ error: "Formato de data inválido (YYYY-MM-DD)" }, { status: 400 })
     }
 
     if (certificate_number_to_update) {
