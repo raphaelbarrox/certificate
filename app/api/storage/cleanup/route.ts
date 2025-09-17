@@ -1,36 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
-async function verifyAdminAccess(request: NextRequest) {
-  const supabase = createClient()
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    return false
-  }
-
-  // Verificar se o usuário tem permissões administrativas
-  // Por enquanto, qualquer usuário autenticado pode acessar
-  // Em produção, você deve verificar roles específicas
-  return true
-}
-
 export async function POST(request: NextRequest) {
-  const hasAccess = await verifyAdminAccess(request)
-  if (!hasAccess) {
-    console.log(`[SECURITY] Unauthorized cleanup attempt - IP: ${request.ip}`)
-    return NextResponse.json({ error: "Acesso não autorizado" }, { status: 401 })
-  }
-
   const supabase = createClient()
 
   try {
     const { action } = await request.json()
-
-    console.log(`[AUDIT] Storage cleanup operation - Action: ${action} - IP: ${request.ip}`)
 
     if (action === "check_orphaned") {
       // Get all PDF URLs from database
@@ -76,10 +51,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "No files specified for deletion" }, { status: 400 })
       }
 
-      if (files_to_delete.length > 100) {
-        return NextResponse.json({ error: "Muitos arquivos para deletar de uma vez. Máximo 100." }, { status: 400 })
-      }
-
       const { data, error } = await supabase.storage.from("generated-certificates").remove(files_to_delete)
 
       if (error) {
@@ -108,38 +79,19 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  const hasAccess = await verifyAdminAccess(request)
-  if (!hasAccess) {
-    return NextResponse.json({ error: "Acesso não autorizado" }, { status: 401 })
-  }
-
+export async function GET() {
   const supabase = createClient()
 
   try {
-    console.log(`[AUDIT] Storage stats request - IP: ${request.ip}`)
-
-    const { data: certificates, error } = await supabase
-      .from("issued_certificates")
-      .select("template_id, pdf_url")
-      .not("pdf_url", "is", null)
+    const { data: storageStats, error } = await supabase.rpc("get_storage_usage_by_template")
 
     if (error) {
-      throw new Error(`Failed to get certificates: ${error.message}`)
+      throw new Error(`Failed to get storage stats: ${error.message}`)
     }
-
-    const storageStats = certificates.reduce((acc: any, cert) => {
-      const templateId = cert.template_id
-      if (!acc[templateId]) {
-        acc[templateId] = { template_id: templateId, certificate_count: 0 }
-      }
-      acc[templateId].certificate_count++
-      return acc
-    }, {})
 
     return NextResponse.json({
       success: true,
-      storage_usage: Object.values(storageStats),
+      storage_usage: storageStats,
     })
   } catch (error) {
     console.error("Storage stats error:", error)

@@ -1,40 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { RateLimiter } from "@/lib/security-validator"
-import { z } from "zod"
-
-const downloadParamsSchema = z.object({
-  id: z
-    .string()
-    .min(1, "ID é obrigatório")
-    .max(100, "ID muito longo")
-    .regex(/^[a-zA-Z0-9\-_]+$/, "ID contém caracteres inválidos"),
-})
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
-    if (!RateLimiter.isAllowed(`download_${clientIP}`, 30, 60000)) {
-      return NextResponse.json({ error: "Muitos downloads. Tente novamente em 1 minuto." }, { status: 429 })
-    }
-
     const { id } = await params
-
-    const validationResult = downloadParamsSchema.safeParse({ id })
-    if (!validationResult.success) {
-      console.log(`[SECURITY] Invalid download ID blocked - IP: ${clientIP} - ID: ${id}`)
-      return NextResponse.json({ error: "ID inválido" }, { status: 400 })
-    }
-
-    const sanitizedId = validationResult.data.id
-    console.log(`[AUDIT] Certificate download - IP: ${clientIP} - ID: ${sanitizedId}`)
-
     const supabase = createClient()
 
     const { data: certificate, error } = await supabase
       .from("issued_certificates")
       .select("pdf_url, certificate_number, recipient_data")
-      .or(`id.eq.${sanitizedId},certificate_number.eq.${sanitizedId}`)
+      .or(`id.eq.${id},certificate_number.eq.${id}`)
       .single()
 
     if (error || !certificate) {
@@ -43,7 +18,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (!certificate.pdf_url) {
-      console.error("PDF URL not found for certificate:", sanitizedId)
+      console.error("PDF URL not found for certificate:", id)
       return NextResponse.json({ error: "PDF não disponível" }, { status: 404 })
     }
 
@@ -60,9 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": `attachment; filename="${fileName}"`,
-          "Cache-Control": "private, max-age=3600",
-          "X-Content-Type-Options": "nosniff",
-          "X-Frame-Options": "DENY",
+          "Cache-Control": "public, max-age=3600",
         },
       })
     } catch (fetchError) {

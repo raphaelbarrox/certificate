@@ -1,33 +1,21 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { searchQuerySchema, sanitizeSearchQuery, RateLimiter } from "@/lib/security-validator"
 
 export async function GET(request: NextRequest) {
   try {
-    const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
-    if (!RateLimiter.isAllowed(`search_${clientIP}`, 20, 60000)) {
-      return NextResponse.json({ error: "Muitas tentativas de busca. Tente novamente em 1 minuto." }, { status: 429 })
-    }
-
     const { searchParams } = new URL(request.url)
-    const rawQuery = searchParams.get("q")?.trim()
+    const query = searchParams.get("q")?.trim()
 
-    if (!rawQuery) {
+    if (!query) {
       return NextResponse.json({ error: "Query parameter is required" }, { status: 400 })
     }
 
-    const validationResult = searchQuerySchema.safeParse({ q: rawQuery })
-    if (!validationResult.success) {
-      console.log(`[SECURITY] Invalid search query blocked: ${rawQuery}`)
-      return NextResponse.json({ error: "Query inválida" }, { status: 400 })
-    }
-
-    const sanitizedQuery = sanitizeSearchQuery(validationResult.data.q)
-
-    console.log(`[AUDIT] Search performed - IP: ${clientIP} - Query: ${sanitizedQuery}`)
-
     const supabase = createClient()
 
+    // Solução simples e performática:
+    // Busca diretamente no banco de dados por uma correspondência exata (case-insensitive)
+    // no código do certificado OU no e-mail.
+    // O operador '.ilike.' sem wildcards (%) funciona como uma igualdade case-insensitive.
     const { data, error } = await supabase
       .from("issued_certificates")
       .select(
@@ -40,14 +28,15 @@ export async function GET(request: NextRequest) {
         )
       `,
       )
+      // Updated .or() clause
       .or(
-        `certificate_number.ilike.${sanitizedQuery},recipient_email.ilike.${sanitizedQuery},recipient_data->>cpf.ilike.${sanitizedQuery},recipient_data->>name.ilike.${sanitizedQuery}`,
+        `certificate_number.ilike.${query},recipient_email.ilike.${query},recipient_data->>cpf.ilike.${query},recipient_data->>name.ilike.${query}`,
       )
       .order("issued_at", { ascending: false })
-      .limit(50)
 
     if (error) {
       console.error("Database search error:", error)
+      // Lançar um erro genérico para o catch block lidar com a resposta ao cliente.
       throw new Error("Database search failed")
     }
 

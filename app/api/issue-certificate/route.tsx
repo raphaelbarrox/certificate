@@ -5,7 +5,6 @@ import nodemailer from "nodemailer"
 import { ImageCache } from "@/lib/image-cache"
 import { PDFCache } from "@/lib/pdf-cache"
 import { QRCodeCache } from "@/lib/qrcode-cache"
-import { certificateIssueSchema, RateLimiter } from "@/lib/security-validator"
 
 async function imageUrlToDataUrl(url: string): Promise<string> {
   return ImageCache.getImageDataUrl(url)
@@ -74,34 +73,13 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 }
 
 export async function POST(request: NextRequest) {
-  const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
-  if (!RateLimiter.isAllowed(`issue_${clientIP}`, 5, 300000)) {
-    // 5 certificados por 5 minutos
-    return NextResponse.json(
-      { error: "Muitas emissões de certificado. Tente novamente em 5 minutos." },
-      { status: 429 },
-    )
-  }
-
   const supabase = createClient()
   let issuedCertificateData: any = null
   let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
-    const rawData = await request.json()
-
-    const validationResult = certificateIssueSchema.safeParse(rawData)
-    if (!validationResult.success) {
-      console.log(`[SECURITY] Invalid certificate issue blocked - IP: ${clientIP}`)
-      return NextResponse.json({ error: "Dados inválidos fornecidos" }, { status: 400 })
-    }
-
     const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
-      validationResult.data
-
-    console.log(
-      `[AUDIT] Certificate issue - IP: ${clientIP} - Template: ${template_id} - Update: ${!!certificate_number_to_update}`,
-    )
+      await request.json()
 
     if (!template_id || !recipient_data || !recipient_cpf || !recipient_dob) {
       return NextResponse.json(
