@@ -10,6 +10,30 @@ async function imageUrlToDataUrl(url: string): Promise<string> {
   return ImageCache.getImageDataUrl(url)
 }
 
+async function logEmailEvent(
+  templateId: string,
+  userId: string,
+  type: string,
+  status: string,
+  message: string,
+  details: any = {},
+) {
+  try {
+    const supabase = createClient()
+    await supabase.from("email_logs").insert({
+      template_id: templateId,
+      user_id: userId,
+      type,
+      status,
+      message,
+      details,
+    })
+    console.log(`📝 [v0] [Email Log] ${status.toUpperCase()}: ${message}`)
+  } catch (error) {
+    console.error(`❌ [v0] [Email Log] Erro ao salvar log:`, error)
+  }
+}
+
 async function sendCertificateEmail(
   template: any,
   recipientData: any,
@@ -17,19 +41,36 @@ async function sendCertificateEmail(
   pdfUrl: string,
   pdfBytes: ArrayBuffer,
 ) {
-  console.log(`🔍 [v0] [Email Debug] Verificando configuração de email para template ${template.id}`)
-  console.log(`🔍 [v0] [Email Debug] Template form_design:`, template.form_design ? "existe" : "não existe")
-  console.log(`🔍 [v0] [Email Debug] EmailConfig:`, template.form_design?.emailConfig || "não configurado")
-
+  const startTime = Date.now()
   const emailConfig = template.form_design?.emailConfig
+
+  await logEmailEvent(
+    template.id,
+    template.user_id,
+    "certificate_issued",
+    "info",
+    "Iniciando processo de envio de certificado",
+    {
+      certificateId: certificateNumber,
+      configEnabled: !!emailConfig?.enabled,
+      hasResendConfig: !!emailConfig?.resend,
+    },
+  )
+
   if (!emailConfig || !emailConfig.enabled) {
     console.log(`🔕 [v0] [Email] Envio desativado para o template ${template.id}.`)
-    console.log(
-      `🔍 [v0] [Email Debug] Motivo: ${!emailConfig ? "emailConfig não existe" : "emailConfig.enabled = false"}`,
+    await logEmailEvent(
+      template.id,
+      template.user_id,
+      "certificate_issued",
+      "info",
+      "Envio de email desativado na configuração do template",
+      { certificateId: certificateNumber },
     )
     return
   }
 
+  // Priorizar 'email' (campo padrão do formulário) ao invés de 'default_email'
   const recipientEmail = recipientData.email || recipientData.default_email
 
   console.log(`🔍 [v0] [Email Debug] Dados do destinatário:`, {
@@ -41,55 +82,43 @@ async function sendCertificateEmail(
   })
 
   if (!recipientEmail) {
-    console.error(
-      `❌ [v0] [Email] ERRO: Nenhum email encontrado nos dados do destinatário para o certificado ${certificateNumber}`,
-    )
+    const errorMsg = `Nenhum email encontrado nos dados do destinatário`
+    console.error(`❌ [v0] [Email] ERRO: ${errorMsg} para o certificado ${certificateNumber}`)
     console.error(`🔍 [v0] [Email] Dados disponíveis:`, Object.keys(recipientData))
+
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      availableFields: Object.keys(recipientData),
+      error: "No email field found in recipient data",
+    })
     return
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(recipientEmail)) {
-    console.error(`❌ [v0] [Email] ERRO: Email inválido '${recipientEmail}' para o certificado ${certificateNumber}`)
+    const errorMsg = `Email inválido: ${recipientEmail}`
+    console.error(`❌ [v0] [Email] ERRO: ${errorMsg} para o certificado ${certificateNumber}`)
+
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      recipient: recipientEmail,
+      error: "Invalid email format",
+    })
     return
   }
 
   try {
     console.log(`🚀 [v0] [Email] ✅ Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
 
-    const finalEmailConfig = {
-      enabled: true,
-      provider: "resend" as const,
-      senderName: emailConfig.senderName || "Certificados",
-      senderEmail: emailConfig.senderEmail || "contact@therapist.international",
-      subject: emailConfig.subject || "Seu certificado está pronto!",
-      body:
-        emailConfig.body ||
-        `
-        <h2>Parabéns! Seu certificado foi gerado com sucesso.</h2>
-        <p>Olá {{nome}},</p>
-        <p>Seu certificado foi gerado e está anexado neste email.</p>
-        <p>Número do certificado: {{certificate_id}}</p>
-        <p>Atenciosamente,<br>Equipe de Certificados</p>
-      `,
-      resend: {
-        enabled: true,
-        apiKey: emailConfig.resend?.apiKey || process.env.RESEND_API_KEY || "",
-      },
-    }
-
-    console.log(`🔍 [v0] [Email Debug] Configuração final:`, {
-      enabled: finalEmailConfig.enabled,
-      provider: finalEmailConfig.provider,
-      senderName: finalEmailConfig.senderName,
-      senderEmail: finalEmailConfig.senderEmail,
-      hasApiKey: !!finalEmailConfig.resend.apiKey,
-      subject: finalEmailConfig.subject.substring(0, 50) + "...",
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "info", "Preparando envio de email", {
+      certificateId: certificateNumber,
+      recipient: recipientEmail,
+      pdfSize: `${Math.round(pdfBytes.byteLength / 1024)}KB`,
     })
 
     // Replace placeholders
-    let finalBody = finalEmailConfig.body
-    let finalSubject = finalEmailConfig.subject
+    let finalBody = emailConfig.body
+    let finalSubject = emailConfig.subject
 
     const allData = {
       ...recipientData,
@@ -112,6 +141,110 @@ async function sendCertificateEmail(
 
     console.log(`📧 [v0] [Email] Enviando email com anexo de ${Math.round(pdfBytes.byteLength / 1024)}KB`)
 
+    let finalEmailConfig = {
+      ...emailConfig,
+      provider: "resend" as const,
+    }
+
+    // Se há keyHash mas não há apiKey, precisamos descriptografar
+    if (emailConfig.resend?.keyHash && !emailConfig.resend?.apiKey) {
+      console.log(`🔐 [v0] [Email] Detectado keyHash, descriptografando API Key...`)
+
+      await logEmailEvent(
+        template.id,
+        template.user_id,
+        "certificate_issued",
+        "info",
+        "Descriptografando API Key do Resend",
+        {
+          certificateId: certificateNumber,
+          keyHash: emailConfig.resend.keyHash.substring(0, 8) + "...",
+        },
+      )
+
+      // Buscar o user_id do template
+      const supabase = createClient()
+      const { data: templateData, error: templateError } = await supabase
+        .from("certificate_templates")
+        .select("user_id")
+        .eq("id", template.id)
+        .single()
+
+      if (templateError || !templateData) {
+        const errorMsg = `Não foi possível obter user_id do template`
+        console.error(`❌ [v0] [Email] ERRO: ${errorMsg} ${template.id}`)
+
+        await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+          certificateId: certificateNumber,
+          error: templateError?.message || "Template not found",
+        })
+        return
+      }
+
+      try {
+        // Importar o SecureEmailService
+        const { SecureEmailService } = await import("@/lib/email-providers/secure-email-service")
+
+        const decryptedConfig = await SecureEmailService.getDecryptedConfig(templateData.user_id, emailConfig)
+        finalEmailConfig = decryptedConfig
+
+        console.log(`✅ [v0] [Email] API Key descriptografada com sucesso`)
+
+        await logEmailEvent(
+          template.id,
+          template.user_id,
+          "certificate_issued",
+          "info",
+          "API Key descriptografada com sucesso",
+          {
+            certificateId: certificateNumber,
+            apiKeyStatus: "decrypted",
+          },
+        )
+      } catch (decryptError) {
+        const errorMsg = `Erro ao descriptografar API Key`
+        console.error(`❌ [v0] [Email] ${errorMsg}:`, decryptError)
+        console.error(`🔍 [v0] [Email] Detalhes - keyHash: ${emailConfig.resend?.keyHash?.substring(0, 8)}...`)
+
+        await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+          certificateId: certificateNumber,
+          keyHash: emailConfig.resend?.keyHash?.substring(0, 8) + "...",
+          error: decryptError.message,
+        })
+        return
+      }
+    }
+
+    // Verificar se temos uma API Key válida
+    if (!finalEmailConfig.resend?.apiKey) {
+      const errorMsg = `API Key do Resend não encontrada ou inválida`
+      console.error(`❌ [v0] [Email] ERRO: ${errorMsg}`)
+      console.error(`🔍 [v0] [Email] Config debug:`, {
+        hasResendConfig: !!finalEmailConfig.resend,
+        hasApiKey: !!finalEmailConfig.resend?.apiKey,
+        hasKeyHash: !!emailConfig.resend?.keyHash,
+        provider: finalEmailConfig.provider,
+      })
+
+      await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+        certificateId: certificateNumber,
+        configStatus: {
+          hasResendConfig: !!finalEmailConfig.resend,
+          hasApiKey: !!finalEmailConfig.resend?.apiKey,
+          hasKeyHash: !!emailConfig.resend?.keyHash,
+          provider: finalEmailConfig.provider,
+        },
+      })
+      return
+    }
+
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "info", "Enviando email via Resend", {
+      certificateId: certificateNumber,
+      recipient: recipientEmail,
+      subject: finalSubject,
+      apiKeyStatus: "valid",
+    })
+
     const result = await EmailService.sendEmailWithRetry(
       {
         to: recipientEmail,
@@ -123,21 +256,47 @@ async function sendCertificateEmail(
       3,
     )
 
+    const duration = Date.now() - startTime
+
     if (result.success) {
+      const successMsg = `Email enviado com sucesso para ${recipientEmail}`
       console.log(
-        `✅ [v0] [Email] SUCESSO: Email enviado para ${recipientEmail} após ${result.attempts} tentativa(s). ID: ${result.messageId}`,
+        `✅ [v0] [Email] SUCESSO: ${successMsg} após ${result.attempts} tentativa(s). ID: ${result.messageId}`,
       )
+
+      await logEmailEvent(template.id, template.user_id, "certificate_issued", "success", successMsg, {
+        certificateId: certificateNumber,
+        recipient: recipientEmail,
+        messageId: result.messageId,
+        attempts: result.attempts,
+        duration,
+      })
     } else {
-      console.error(
-        `❌ [v0] [Email] FALHA: Erro no envio para ${recipientEmail} após ${result.attempts} tentativas: ${result.error}`,
-      )
+      const errorMsg = `Falha no envio para ${recipientEmail} após ${result.attempts} tentativas`
+      console.error(`❌ [v0] [Email] FALHA: ${errorMsg}: ${result.error}`)
+
+      await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+        certificateId: certificateNumber,
+        recipient: recipientEmail,
+        attempts: result.attempts,
+        duration,
+        error: result.error,
+      })
     }
   } catch (error) {
+    const duration = Date.now() - startTime
+    const errorMsg = `Exceção durante envio de email para ${recipientEmail}`
+
     // Log the error but do not throw, to avoid breaking the main flow
-    console.error(
-      `❌ [v0] [Email] EXCEÇÃO: Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`,
-      error,
-    )
+    console.error(`❌ [v0] [Email] EXCEÇÃO: ${errorMsg} (Certificado: ${certificateNumber}):`, error)
+
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      recipient: recipientEmail,
+      duration,
+      error: error.message,
+      stack: error.stack,
+    })
   }
 }
 
@@ -298,13 +457,14 @@ export async function POST(request: NextRequest) {
       issuedCertificateData = newCertificate
     }
 
-    console.log(`🔄 [v0] [Certificate] Certificado gerado com sucesso. Iniciando processo de envio de email...`)
-    console.log(`🔍 [v0] [Certificate Debug] Template ID: ${template.id}`)
-    console.log(`🔍 [v0] [Certificate Debug] Recipient data keys:`, Object.keys(recipient_data))
-    console.log(`🔍 [v0] [Certificate Debug] Certificate number: ${certificateNumber}`)
-
     // Trigger email sending after successful DB operation, without blocking the response
-    sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url, pdfBytes)
+    try {
+      await sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url, pdfBytes)
+      console.log(`✅ [v0] [Email] Processo de email concluído para certificado ${certificateNumber}`)
+    } catch (emailError) {
+      console.error(`❌ [v0] [Email] Erro no processo de email:`, emailError)
+      // Não quebrar o fluxo principal se o email falhar
+    }
 
     return NextResponse.json(issuedCertificateData)
   } catch (error) {

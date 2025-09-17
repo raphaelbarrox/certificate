@@ -47,6 +47,7 @@ import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/auth-provider"
 import { saveApiKeyAction } from "@/app/actions/email-actions"
+import EmailLogsMonitor from "./email-logs-monitor"
 
 interface FormField {
   id: string
@@ -88,7 +89,7 @@ interface EmailConfig {
   resend: {
     enabled: boolean
     apiKey: string
-    keyHash?: string
+    keyHash: string | undefined
   }
 }
 
@@ -113,6 +114,7 @@ interface FormDesignerProps {
   onStateChange: (data: { fields: FormField[]; design: FormDesign }) => void
   initialData?: { fields: FormField[]; design: FormDesign }
   availablePlaceholders?: Array<{ id: string; label: string; type?: "text" | "image" }>
+  templateId?: string
 }
 
 const fieldTypeIcons = {
@@ -162,7 +164,12 @@ const defaultDesign: FormDesign = {
   },
 }
 
-export default function FormDesigner({ onStateChange, initialData, availablePlaceholders = [] }: FormDesignerProps) {
+export default function FormDesigner({
+  onStateChange,
+  initialData,
+  availablePlaceholders = [],
+  templateId,
+}: FormDesignerProps) {
   const defaultFields = useMemo(
     () => [
       {
@@ -287,17 +294,23 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
 
       console.log("[v0] [API Key] ✅ API Key salva com sucesso, hash:", result.keyHash?.substring(0, 8) + "...")
 
-      setDesign((prev) => ({
-        ...prev,
+      const updatedDesign = {
+        ...design,
         emailConfig: {
-          ...prev.emailConfig,
+          ...design.emailConfig,
           resend: {
-            ...prev.emailConfig.resend,
+            ...design.emailConfig.resend,
             keyHash: result.keyHash!,
             apiKey: "", // Limpar a chave do estado local por segurança
           },
         },
-      }))
+      }
+
+      setDesign(updatedDesign)
+
+      if (onStateChange) {
+        onStateChange(updatedDesign)
+      }
 
       toast({
         title: "✅ API Key salva com segurança",
@@ -1394,6 +1407,10 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                             </div>
                           </CardContent>
                         </Card>
+
+                        {templateId && templateId !== "preview" && design.emailConfig.enabled && (
+                          <EmailLogsMonitor templateId={templateId} isEmailEnabled={design.emailConfig.enabled} />
+                        )}
                       </div>
                     )}
                   </CardContent>
