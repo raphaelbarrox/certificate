@@ -87,6 +87,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (certificate_number_to_update) {
+      console.log("[PDF Cache] Invalidating cache for certificate update:", certificate_number_to_update)
+      PDFCache.invalidateForTemplate(template_id)
+    }
+
     const cachedPDF = PDFCache.get(template_id, recipient_data)
     if (cachedPDF && !certificate_number_to_update) {
       console.log("[PDF Cache] Using cached PDF for template:", template_id)
@@ -101,6 +106,28 @@ export async function POST(request: NextRequest) {
 
     if (templateError || !template) {
       return NextResponse.json({ error: "Template de certificado não encontrado" }, { status: 404 })
+    }
+
+    if (certificate_number_to_update) {
+      const { data: existingCertificate, error: checkError } = await supabase
+        .from("issued_certificates")
+        .select("id, template_id, recipient_cpf, recipient_dob")
+        .eq("certificate_number", certificate_number_to_update)
+        .eq("recipient_cpf", recipient_cpf)
+        .eq("recipient_dob", recipient_dob)
+        .single()
+
+      if (checkError || !existingCertificate) {
+        console.error("Certificado não encontrado para atualização:", checkError)
+        return NextResponse.json(
+          { error: "Certificado não encontrado ou dados de validação incorretos" },
+          { status: 404 },
+        )
+      }
+
+      if (existingCertificate.template_id !== template_id) {
+        return NextResponse.json({ error: "Template não corresponde ao certificado original" }, { status: 400 })
+      }
     }
 
     const templateData = template.template_data || {}
@@ -162,12 +189,16 @@ export async function POST(request: NextRequest) {
 
     let pdfBytes: ArrayBuffer
     if (cachedPDF && !certificate_number_to_update) {
+      console.log("[PDF Cache] Using cached PDF for new certificate")
       pdfBytes = cachedPDF
     } else {
+      console.log("[PDF Generation] Generating new PDF for certificate:", certificateNumber)
       const pdf = generateVisualCertificatePDF(templateForPdf, processedRecipientData, qrCodeDataUrl, certificateNumber)
       pdfBytes = pdf.output("arraybuffer")
 
-      PDFCache.set(template_id, recipient_data, pdfBytes)
+      if (!certificate_number_to_update) {
+        PDFCache.set(template_id, recipient_data, pdfBytes)
+      }
     }
 
     const pdfFileName = `certificado-${certificateNumber}.pdf`
@@ -186,6 +217,7 @@ export async function POST(request: NextRequest) {
     const pdf_url = urlData.publicUrl
 
     if (certificate_number_to_update) {
+      console.log("[DB Update] Updating certificate:", certificate_number_to_update)
       const { data: updatedCertificate, error: dbError } = await supabase
         .from("issued_certificates")
         .update({
@@ -194,6 +226,7 @@ export async function POST(request: NextRequest) {
           photo_url: photo_url || null,
           pdf_url: pdf_url,
           issued_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         })
         .eq("certificate_number", certificate_number_to_update)
         .eq("recipient_cpf", recipient_cpf)
@@ -206,6 +239,7 @@ export async function POST(request: NextRequest) {
         throw new Error("Falha ao atualizar os dados do certificado.")
       }
       issuedCertificateData = updatedCertificate
+      console.log("[DB Update] Certificate updated successfully:", updatedCertificate.id)
     } else {
       const { data: newCertificate, error: dbError } = await supabase
         .from("issued_certificates")

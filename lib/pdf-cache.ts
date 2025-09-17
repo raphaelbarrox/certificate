@@ -53,6 +53,27 @@ export class PDFCache {
     })
   }
 
+  static invalidateForTemplate(templateId: string): number {
+    let invalidatedCount = 0
+    for (const [key, value] of this.cache.entries()) {
+      if (value.templateId === templateId) {
+        this.cache.delete(key)
+        invalidatedCount++
+      }
+    }
+    console.log(`[PDF Cache] Invalidated ${invalidatedCount} entries for template ${templateId}`)
+    return invalidatedCount
+  }
+
+  static invalidateSpecific(templateId: string, recipientData: Record<string, any>): boolean {
+    const key = this.generateCacheKey(templateId, recipientData)
+    const deleted = this.cache.delete(key)
+    if (deleted) {
+      console.log(`[PDF Cache] Invalidated specific cache entry: ${key}`)
+    }
+    return deleted
+  }
+
   static clear(): void {
     this.cache.clear()
     this.hits = 0
