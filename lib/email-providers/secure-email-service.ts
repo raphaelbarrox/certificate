@@ -48,14 +48,19 @@ export class SecureEmailService {
     const keyHash = await EmailSecurity.hashApiKey(apiKey)
     const encryptedData = await EmailSecurity.encryptApiKey(apiKey, userId)
 
-    const { error } = await supabase.from("email_api_keys").upsert({
-      user_id: userId,
-      provider,
-      encrypted_key: JSON.stringify(encryptedData),
-      key_hash: keyHash,
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    })
+    const { error } = await supabase.from("email_api_keys").upsert(
+      {
+        user_id: userId,
+        provider,
+        encrypted_key: JSON.stringify(encryptedData),
+        key_hash: keyHash,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id,provider",
+      },
+    )
 
     if (error) {
       throw new Error("Erro ao salvar API key: " + error.message)

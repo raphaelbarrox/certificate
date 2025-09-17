@@ -40,8 +40,8 @@ import {
   Copy,
   Loader2,
   Shield,
+  AlertTriangle,
   Lock,
-  Info,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -1270,14 +1270,11 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                       },
                                     }))
                                   }
-                                  placeholder={
-                                    design.emailConfig.resend.keyHash
-                                      ? "••••••••••••••••••••••••••••••"
-                                      : "re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
-                                  }
+                                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
                                   className="text-sm"
+                                  disabled={!!design.emailConfig.resend.keyHash}
                                 />
-                                {design.emailConfig.resend.apiKey && (
+                                {design.emailConfig.resend.apiKey && !design.emailConfig.resend.keyHash && (
                                   <Button
                                     size="sm"
                                     onClick={() => handleSaveApiKey(design.emailConfig.resend.apiKey)}
@@ -1313,16 +1310,48 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                       <X className="h-3 w-3" />
                                     </Button>
                                   </div>
-                                  <div className="text-xs text-green-700 mt-1">
-                                    💡 Para alterar a API Key, digite uma nova chave no campo acima
-                                  </div>
                                 </div>
                               ) : (
-                                <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
-                                  <div className="flex items-center gap-2 text-xs text-blue-800">
-                                    <Info className="h-3 w-3" />
-                                    <div>
-                                      <div>🔑 Digite sua API Key do Resend</div>
+                                <div className="space-y-2">
+                                  <p className="text-xs text-gray-500">
+                                    Obtenha sua API Key em{" "}
+                                    <a
+                                      href="https://resend.com/api-keys"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      resend.com/api-keys
+                                    </a>
+                                  </p>
+
+                                  <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                                    <div className="flex items-start gap-2">
+                                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-xs text-amber-800">
+                                        <p className="font-medium mb-1">⚠️ Domínio deve estar verificado no Resend</p>
+                                        <ul className="space-y-1 text-xs">
+                                          <li>• O email remetente deve usar um domínio verificado</li>
+                                          <li>
+                                            • Configure SPF e DKIM em{" "}
+                                            <a
+                                              href="https://resend.com/domains"
+                                              target="_blank"
+                                              className="underline"
+                                              rel="noreferrer"
+                                            >
+                                              resend.com/domains
+                                            </a>
+                                          </li>
+                                          <li>• Exemplo: se seu domínio é "empresa.com", use "noreply@empresa.com"</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
+                                    <div className="flex items-center gap-2 text-xs text-blue-800">
+                                      <Shield className="h-3 w-3" />
                                       <span>💡 Clique em "Salvar" para criptografar sua API Key</span>
                                     </div>
                                   </div>

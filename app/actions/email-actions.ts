@@ -14,19 +14,16 @@ export async function saveApiKeyAction(
     const keyHash = await EmailSecurity.hashApiKey(apiKey)
     const encryptedData = await EmailSecurity.encryptApiKey(apiKey, userId)
 
-    const { error } = await supabase.from("email_api_keys").upsert(
-      {
-        user_id: userId,
-        provider,
-        encrypted_key: JSON.stringify(encryptedData),
-        key_hash: keyHash,
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "user_id,provider",
-      },
-    )
+    await supabase.from("email_api_keys").delete().eq("user_id", userId).eq("provider", provider)
+
+    const { error } = await supabase.from("email_api_keys").insert({
+      user_id: userId,
+      provider,
+      encrypted_key: JSON.stringify(encryptedData),
+      key_hash: keyHash,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
 
     if (error) {
       return { success: false, error: "Erro ao salvar API key: " + error.message }
