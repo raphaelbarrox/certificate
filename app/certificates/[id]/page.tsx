@@ -1,5 +1,3 @@
-"use client"
-
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +10,7 @@ import { AuditLogger } from "@/lib/audit-logger"
 import { headers } from "next/headers"
 
 interface CertificatePageProps {
-  params: Promise<{ id: string }>
+  params: { id: string }
 }
 
 const formatDisplayValue = (key: string, value: any): string => {
@@ -44,7 +42,7 @@ const formatDisplayLabel = (key: string): string => {
 }
 
 export default async function CertificatePage({ params }: CertificatePageProps) {
-  const { id } = await params
+  const { id } = params
   const supabase = createClient()
 
   const headersList = headers()
