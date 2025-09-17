@@ -39,6 +39,9 @@ import {
   Server,
   Copy,
   Loader2,
+  Shield,
+  AlertTriangle,
+  Lock,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -1157,10 +1160,14 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                           </CardContent>
                         </Card>
 
+                        {/* Melhorando interface do Resend com validações e indicações de segurança */}
                         {design.emailConfig.provider === "resend" ? (
                           <Card>
                             <CardHeader className="pb-2">
-                              <CardTitle className="text-sm">Configuração Resend</CardTitle>
+                              <CardTitle className="text-sm flex items-center gap-2">
+                                <Shield className="h-4 w-4 text-green-600" />
+                                Configuração Resend (Segura)
+                              </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-3">
                               <div className="space-y-1">
@@ -1180,45 +1187,50 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                   placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
                                   className="text-sm"
                                 />
-                                <p className="text-xs text-gray-500">
-                                  Obtenha sua API Key em{" "}
-                                  <a
-                                    href="https://resend.com/api-keys"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:underline"
-                                  >
-                                    resend.com/api-keys
-                                  </a>
-                                </p>
-                              </div>
-                              <div className="flex gap-2 pt-2">
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleTestSmtp("verify")}
-                                  disabled={isTestingSmtp}
-                                  className="w-full text-sm bg-transparent"
-                                >
-                                  {isTestingSmtp ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  ) : (
-                                    <Server className="h-4 w-4 mr-2" />
-                                  )}
-                                  {isTestingSmtp ? "Testando..." : "Testar API Key"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleTestSmtp("send")}
-                                  disabled={isTestingSmtp}
-                                  className="w-full text-sm bg-transparent"
-                                >
-                                  {isTestingSmtp ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  ) : (
-                                    <Send className="h-4 w-4 mr-2" />
-                                  )}
-                                  {isTestingSmtp ? "Enviando..." : "Enviar Teste"}
-                                </Button>
+                                <div className="space-y-2">
+                                  <p className="text-xs text-gray-500">
+                                    Obtenha sua API Key em{" "}
+                                    <a
+                                      href="https://resend.com/api-keys"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      resend.com/api-keys
+                                    </a>
+                                  </p>
+
+                                  <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                                    <div className="flex items-start gap-2">
+                                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                      <div className="text-xs text-amber-800">
+                                        <p className="font-medium mb-1">⚠️ Domínio deve estar verificado no Resend</p>
+                                        <ul className="space-y-1 text-xs">
+                                          <li>• O email remetente deve usar um domínio verificado</li>
+                                          <li>
+                                            • Configure SPF e DKIM em{" "}
+                                            <a
+                                              href="https://resend.com/domains"
+                                              target="_blank"
+                                              className="underline"
+                                              rel="noreferrer"
+                                            >
+                                              resend.com/domains
+                                            </a>
+                                          </li>
+                                          <li>• Exemplo: se seu domínio é "empresa.com", use "noreply@empresa.com"</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-green-50 border border-green-200 rounded-md p-2">
+                                    <div className="flex items-center gap-2 text-xs text-green-800">
+                                      <Lock className="h-3 w-3" />
+                                      <span>API Key será criptografada e armazenada com segurança</span>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </CardContent>
                           </Card>
