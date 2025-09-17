@@ -1,16 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { requireAuth, checkRateLimit } from "@/lib/auth-utils"
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request)
-
-    if (!checkRateLimit(request, 20, 60000)) {
-      // 20 buscas por minuto
-      return NextResponse.json({ error: "Muitas tentativas. Tente novamente em alguns minutos." }, { status: 429 })
-    }
-
     const { searchParams } = new URL(request.url)
     const query = searchParams.get("q")?.trim()
 
@@ -54,12 +46,6 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error("Search API error:", error)
-    const errorMessage = error instanceof Error ? error.message : "Erro interno do servidor. Tente novamente."
-
-    if (errorMessage.includes("Acesso negado")) {
-      return NextResponse.json({ error: errorMessage }, { status: 401 })
-    }
-
     return NextResponse.json({ error: "Erro interno do servidor. Tente novamente." }, { status: 500 })
   }
 }

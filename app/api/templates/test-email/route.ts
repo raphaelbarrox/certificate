@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
 import nodemailer from "nodemailer"
-import { requireAuth, checkRateLimit } from "@/lib/auth-utils"
 
 export const runtime = "nodejs" // Force Node.js runtime
 
@@ -27,13 +26,6 @@ function getErrorSuggestion(errorCode?: string, errorMessage?: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth(request)
-
-    if (!checkRateLimit(request, 3, 60000)) {
-      // 3 tentativas por minuto
-      return NextResponse.json({ error: "Muitas tentativas de teste. Aguarde um minuto." }, { status: 429 })
-    }
-
     const { action, config } = await request.json()
 
     if (!config || !config.smtp) {
@@ -46,7 +38,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Todos os campos SMTP são obrigatórios." }, { status: 400 })
     }
 
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       host: smtp.host,
       port: smtp.port,
       secure: smtp.port === 465, // Enforce direct TLS only for port 465. For other ports (like 587), this will be false, allowing nodemailer to use STARTTLS.
@@ -81,7 +73,6 @@ export async function POST(request: NextRequest) {
         <p><strong>Servidor:</strong> ${smtp.host}</p>
         <p><strong>Porta:</strong> ${smtp.port}</p>
         <p><strong>Usuário:</strong> ${smtp.user}</p>
-        <p><strong>Testado por:</strong> ${user.email}</p>
       `,
       })
       return NextResponse.json({ message: `Email de teste enviado com sucesso para ${senderEmail}!` })
@@ -92,11 +83,6 @@ export async function POST(request: NextRequest) {
     console.error("[SMTP Test Error]", error)
     const suggestion = getErrorSuggestion(error.code, error.message)
     const errorMessage = `Falha no teste: ${error.message}. Sugestão: ${suggestion}`
-
-    if (error.message?.includes("Acesso negado")) {
-      return NextResponse.json({ error: error.message }, { status: 401 })
-    }
-
     return NextResponse.json({ error: errorMessage }, { status: 500 })
   }
 }
