@@ -144,10 +144,6 @@ export default async function CertificatePage({ params }: CertificatePageProps) 
     status: "success",
   })
 
-  const handleDownloadClick = async () => {
-    await AuditLogger.logCertificateDownload(certificate.certificate_number, clientIP, userAgent)
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -223,7 +219,6 @@ export default async function CertificatePage({ params }: CertificatePageProps) 
                   download={`certificado-${certificate.certificate_number}.pdf`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => handleDownloadClick()}
                 >
                   <Download className="h-5 w-5 mr-2" />
                   Baixar Certificado PDF
