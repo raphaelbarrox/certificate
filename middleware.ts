@@ -1,6 +1,5 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
-import { AdvancedRateLimiter } from "@/lib/advanced-rate-limiter"
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -58,46 +57,18 @@ export async function middleware(request: NextRequest) {
   const isApiRoute = request.nextUrl.pathname.startsWith("/api/")
 
   if (isApiRoute) {
+    // Log de auditoria para todas as requisições de API
     const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
     const userAgent = request.headers.get("user-agent") || "unknown"
     const timestamp = new Date().toISOString()
-
-    let endpoint = "default"
-    if (request.nextUrl.pathname.includes("/issue-certificate")) endpoint = "issue"
-    else if (request.nextUrl.pathname.includes("/generate-certificate")) endpoint = "generate"
-    else if (request.nextUrl.pathname.includes("/search-certificates")) endpoint = "search"
-    else if (request.nextUrl.pathname.includes("/check-certificate")) endpoint = "check"
-    else if (request.nextUrl.pathname.includes("/download")) endpoint = "download"
-
-    const rateLimitResult = AdvancedRateLimiter.isAllowed(clientIP, endpoint)
-
-    if (!rateLimitResult.allowed) {
-      console.log(
-        `[SECURITY BLOCK] ${timestamp} - Rate limit exceeded - ${request.method} ${request.nextUrl.pathname} - IP: ${clientIP} - Reason: ${rateLimitResult.reason}`,
-      )
-
-      const errorResponse = NextResponse.json(
-        {
-          error: rateLimitResult.reason || "Muitas requisições. Tente novamente mais tarde.",
-          retryAfter: rateLimitResult.retryAfter,
-        },
-        { status: 429 },
-      )
-
-      if (rateLimitResult.retryAfter) {
-        errorResponse.headers.set("Retry-After", rateLimitResult.retryAfter.toString())
-      }
-      errorResponse.headers.set("X-RateLimit-Limit", "Varia por endpoint")
-      errorResponse.headers.set("X-RateLimit-Remaining", "0")
-
-      return errorResponse
-    }
 
     console.log(
       `[SECURITY AUDIT] ${timestamp} - ${request.method} ${request.nextUrl.pathname} - IP: ${clientIP} - UA: ${userAgent}`,
     )
 
+    // Verificar se é uma rota administrativa crítica
     const adminRoutes = ["/api/storage/cleanup", "/api/templates/test-email"]
+
     const isAdminRoute = adminRoutes.some((route) => request.nextUrl.pathname.startsWith(route))
 
     if (isAdminRoute) {
@@ -111,11 +82,22 @@ export async function middleware(request: NextRequest) {
       }
     }
 
+    // Rate limiting básico por IP
+    const rateLimitKey = `rate_limit_${clientIP}`
+    const rateLimitHeader = request.headers.get("x-rate-limit-count") || "0"
+    const requestCount = Number.parseInt(rateLimitHeader) + 1
+
+    if (requestCount > 100) {
+      // 100 requests por período
+      console.log(`[SECURITY BLOCK] Rate limit exceeded for IP: ${clientIP}`)
+      return NextResponse.json({ error: "Muitas requisições. Tente novamente mais tarde." }, { status: 429 })
+    }
+
+    // Adicionar headers de segurança
+    response.headers.set("x-rate-limit-count", requestCount.toString())
     response.headers.set("X-Content-Type-Options", "nosniff")
     response.headers.set("X-Frame-Options", "DENY")
     response.headers.set("X-XSS-Protection", "1; mode=block")
-    response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-    response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
   }
 
   return response
