@@ -11,9 +11,9 @@ const CheckCertificateSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
-  const supabase = createClient()
   const clientIP = request.ip || request.headers.get("x-forwarded-for") || "unknown"
   const userAgent = request.headers.get("user-agent") || "unknown"
+  const supabase = await createClient()
 
   try {
     const requestBody = await request.json()
