@@ -19,36 +19,37 @@ async function sendCertificateEmail(
 ) {
   const emailConfig = template.form_design?.emailConfig
   if (!emailConfig || !emailConfig.enabled) {
-    console.log(`[v0] [Email] Envio desativado para o template ${template.id}.`)
+    console.log(`🔕 [v0] [Email] Envio desativado para o template ${template.id}.`)
     return
   }
 
   // Priorizar 'email' (campo padrão do formulário) ao invés de 'default_email'
   const recipientEmail = recipientData.email || recipientData.default_email
 
-  console.log(`[v0] [Email Debug] Dados do destinatário:`, {
+  console.log(`🔍 [v0] [Email Debug] Dados do destinatário:`, {
     hasEmail: !!recipientData.email,
     hasDefaultEmail: !!recipientData.default_email,
     finalEmail: recipientEmail,
     allKeys: Object.keys(recipientData),
+    certificateNumber,
   })
 
   if (!recipientEmail) {
     console.error(
-      `[v0] [Email] ERRO: Nenhum email encontrado nos dados do destinatário para o certificado ${certificateNumber}`,
+      `❌ [v0] [Email] ERRO: Nenhum email encontrado nos dados do destinatário para o certificado ${certificateNumber}`,
     )
-    console.error(`[v0] [Email] Dados disponíveis:`, Object.keys(recipientData))
+    console.error(`🔍 [v0] [Email] Dados disponíveis:`, Object.keys(recipientData))
     return
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(recipientEmail)) {
-    console.error(`[v0] [Email] ERRO: Email inválido '${recipientEmail}' para o certificado ${certificateNumber}`)
+    console.error(`❌ [v0] [Email] ERRO: Email inválido '${recipientEmail}' para o certificado ${certificateNumber}`)
     return
   }
 
   try {
-    console.log(`[v0] [Email] ✅ Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
+    console.log(`🚀 [v0] [Email] ✅ Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
 
     // Replace placeholders
     let finalBody = emailConfig.body
@@ -73,7 +74,13 @@ async function sendCertificateEmail(
       contentType: "application/pdf",
     }
 
-    console.log(`[v0] [Email] 📧 Enviando email com anexo de ${Math.round(pdfBytes.byteLength / 1024)}KB`)
+    console.log(`📧 [v0] [Email] Enviando email com anexo de ${Math.round(pdfBytes.byteLength / 1024)}KB`)
+
+    // Forçar provider para resend
+    const finalEmailConfig = {
+      ...emailConfig,
+      provider: "resend" as const,
+    }
 
     const result = await EmailService.sendEmailWithRetry(
       {
@@ -81,24 +88,24 @@ async function sendCertificateEmail(
         subject: finalSubject,
         html: finalBody,
         attachments: [pdfAttachment],
-        config: emailConfig,
+        config: finalEmailConfig,
       },
       3,
     )
 
     if (result.success) {
       console.log(
-        `[v0] [Email] ✅ SUCESSO: Email enviado para ${recipientEmail} após ${result.attempts} tentativa(s). ID: ${result.messageId}`,
+        `✅ [v0] [Email] SUCESSO: Email enviado para ${recipientEmail} após ${result.attempts} tentativa(s). ID: ${result.messageId}`,
       )
     } else {
       console.error(
-        `[v0] [Email] ❌ FALHA: Erro no envio para ${recipientEmail} após ${result.attempts} tentativas: ${result.error}`,
+        `❌ [v0] [Email] FALHA: Erro no envio para ${recipientEmail} após ${result.attempts} tentativas: ${result.error}`,
       )
     }
   } catch (error) {
     // Log the error but do not throw, to avoid breaking the main flow
     console.error(
-      `[v0] [Email] ❌ EXCEÇÃO: Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`,
+      `❌ [v0] [Email] EXCEÇÃO: Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`,
       error,
     )
   }

@@ -35,46 +35,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Configuração de email ausente." }, { status: 400 })
     }
 
-    const { provider, senderEmail, senderName } = config
+    const { senderEmail, senderName } = config
 
-    if (provider === "resend") {
-      if (!config.resend?.apiKey) {
-        return NextResponse.json(
-          {
-            error: "API Key do Resend é obrigatória.",
-          },
-          { status: 400 },
-        )
-      }
+    // Forçar provider para resend
+    config.provider = "resend"
 
-      if (!config.resend.apiKey.startsWith("re_")) {
-        return NextResponse.json(
-          {
-            error: "API Key do Resend deve começar com 're_'. Verifique se copiou corretamente.",
-          },
-          { status: 400 },
-        )
-      }
+    if (!config.resend?.apiKey) {
+      return NextResponse.json(
+        {
+          error: "API Key do Resend é obrigatória.",
+        },
+        { status: 400 },
+      )
+    }
 
-      if (!senderEmail) {
-        return NextResponse.json(
-          {
-            error: "Email do remetente é obrigatório para o Resend.",
-          },
-          { status: 400 },
-        )
-      }
+    if (!config.resend.apiKey.startsWith("re_")) {
+      return NextResponse.json(
+        {
+          error: "API Key do Resend deve começar com 're_'. Verifique se copiou corretamente.",
+        },
+        { status: 400 },
+      )
+    }
 
-      // Verificar se o domínio do email parece ser personalizado
-      const emailDomain = senderEmail.split("@")[1]
-      if (["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"].includes(emailDomain)) {
-        return NextResponse.json(
-          {
-            error: `Resend não permite emails de provedores públicos como ${emailDomain}. Use um domínio próprio verificado no Resend.`,
-          },
-          { status: 400 },
-        )
-      }
+    if (!senderEmail) {
+      return NextResponse.json(
+        {
+          error: "Email do remetente é obrigatório para o Resend.",
+        },
+        { status: 400 },
+      )
+    }
+
+    // Verificar se o domínio do email parece ser personalizado
+    const emailDomain = senderEmail.split("@")[1]
+    if (["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"].includes(emailDomain)) {
+      return NextResponse.json(
+        {
+          error: `Resend não permite emails de provedores públicos como ${emailDomain}. Use um domínio próprio verificado no Resend.`,
+        },
+        { status: 400 },
+      )
     }
 
     if (action === "verify") {
@@ -83,22 +84,19 @@ export async function POST(request: NextRequest) {
       if (!result.success) {
         let errorMessage = result.error || "Falha na verificação"
 
-        if (provider === "resend") {
-          if (errorMessage.includes("401") || errorMessage.includes("unauthorized")) {
-            errorMessage = "API Key do Resend inválida. Verifique se a chave está correta e ativa."
-          } else if (errorMessage.includes("domain")) {
-            errorMessage = "Domínio não verificado no Resend. Acesse resend.com/domains para verificar seu domínio."
-          } else if (errorMessage.includes("forbidden")) {
-            errorMessage = "Email remetente não autorizado. Certifique-se de que o domínio está verificado no Resend."
-          }
+        if (errorMessage.includes("401") || errorMessage.includes("unauthorized")) {
+          errorMessage = "API Key do Resend inválida. Verifique se a chave está correta e ativa."
+        } else if (errorMessage.includes("domain")) {
+          errorMessage = "Domínio não verificado no Resend. Acesse resend.com/domains para verificar seu domínio."
+        } else if (errorMessage.includes("forbidden")) {
+          errorMessage = "Email remetente não autorizado. Certifique-se de que o domínio está verificado no Resend."
         }
 
         throw new Error(errorMessage)
       }
 
-      const providerName = provider === "resend" ? "Resend" : "SMTP"
       return NextResponse.json({
-        message: `✅ Conexão com ${providerName} bem-sucedida! Configuração válida.`,
+        message: `✅ Conexão com Resend bem-sucedida! Configuração válida.`,
       })
     }
 
@@ -112,24 +110,14 @@ export async function POST(request: NextRequest) {
         subject: "✅ Teste de Conexão - CertGen",
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #10b981;">🎉 Teste de Conexão ${provider === "resend" ? "Resend" : "SMTP"}</h1>
+            <h1 style="color: #10b981;">🎉 Teste de Conexão Resend</h1>
             <p>Se você recebeu este email, suas configurações estão funcionando <strong>perfeitamente</strong>!</p>
             
             <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
               <h3 style="margin: 0 0 10px 0; color: #374151;">📋 Detalhes da Configuração:</h3>
-              ${
-                provider === "resend"
-                  ? `
-                    <p><strong>🚀 Provedor:</strong> Resend API</p>
-                    <p><strong>📧 Email Remetente:</strong> ${senderEmail}</p>
-                    <p><strong>✅ Status:</strong> Domínio verificado e funcionando</p>
-                  `
-                  : `
-                    <p><strong>🖥️ Servidor:</strong> ${config.smtp?.host}</p>
-                    <p><strong>🔌 Porta:</strong> ${config.smtp?.port}</p>
-                    <p><strong>👤 Usuário:</strong> ${config.smtp?.user}</p>
-                  `
-              }
+              <p><strong>🚀 Provedor:</strong> Resend API</p>
+              <p><strong>📧 Email Remetente:</strong> ${senderEmail}</p>
+              <p><strong>✅ Status:</strong> Domínio verificado e funcionando</p>
             </div>
             
             <p style="color: #6b7280; font-size: 14px;">
@@ -143,7 +131,7 @@ export async function POST(request: NextRequest) {
       if (!result.success) {
         let errorMessage = result.error || "Falha no envio do teste"
 
-        if (provider === "resend" && errorMessage.includes("domain")) {
+        if (errorMessage.includes("domain")) {
           errorMessage =
             "❌ Domínio não verificado no Resend. Acesse https://resend.com/domains para verificar seu domínio antes de enviar emails."
         }
@@ -158,10 +146,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Ação inválida." }, { status: 400 })
   } catch (error: any) {
-    console.error("[Email Test Error]", error)
+    console.error("❌ [Email Test Error]", error)
 
-    let suggestion = getErrorSuggestion(error.code, error.message)
-
+    let suggestion = ""
     if (error.message.includes("domain")) {
       suggestion = "Configure seu domínio no Resend: https://resend.com/domains"
     } else if (error.message.includes("unauthorized") || error.message.includes("401")) {

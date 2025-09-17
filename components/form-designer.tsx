@@ -1025,49 +1025,19 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                             <CardTitle className="text-sm">Provedor de Email</CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-3">
-                            <div className="flex gap-4">
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="radio"
-                                  id="provider-resend"
-                                  name="email-provider"
-                                  checked={design.emailConfig.provider === "resend"}
-                                  onChange={() =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: { ...prev.emailConfig, provider: "resend" },
-                                    }))
-                                  }
-                                  className="w-4 h-4"
-                                />
-                                <Label htmlFor="provider-resend" className="text-sm font-medium">
-                                  Resend (Recomendado)
-                                </Label>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="radio"
-                                  id="provider-smtp"
-                                  name="email-provider"
-                                  checked={design.emailConfig.provider === "smtp"}
-                                  onChange={() =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: { ...prev.emailConfig, provider: "smtp" },
-                                    }))
-                                  }
-                                  className="w-4 h-4"
-                                />
-                                <Label htmlFor="provider-smtp" className="text-sm font-medium">
-                                  SMTP Personalizado
-                                </Label>
+                            <div className="flex items-center justify-center p-4 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex items-center space-x-3">
+                                <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium text-green-800">Resend (Recomendado)</Label>
+                                  <p className="text-xs text-green-600 mt-1">
+                                    Resend oferece melhor entregabilidade e anexos automáticos de PDF.
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-500">
-                              {design.emailConfig.provider === "resend"
-                                ? "Resend oferece melhor entregabilidade e anexos automáticos de PDF."
-                                : "Use seu próprio servidor SMTP ou provedor de email."}
-                            </p>
                           </CardContent>
                         </Card>
 
@@ -1102,7 +1072,7 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                       emailConfig: { ...prev.emailConfig, senderEmail: e.target.value },
                                     }))
                                   }
-                                  placeholder="contato@suaempresa.com"
+                                  placeholder="contato@seudominio.com"
                                   className="text-sm"
                                 />
                               </div>
@@ -1160,210 +1130,107 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                           </CardContent>
                         </Card>
 
-                        {/* Melhorando interface do Resend com validações e indicações de segurança */}
-                        {design.emailConfig.provider === "resend" ? (
-                          <Card>
-                            <CardHeader className="pb-2">
-                              <CardTitle className="text-sm flex items-center gap-2">
-                                <Shield className="h-4 w-4 text-green-600" />
-                                Configuração Resend (Segura)
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                              <div className="space-y-1">
-                                <Label className="text-xs">API Key do Resend</Label>
-                                <Input
-                                  type="password"
-                                  value={design.emailConfig.resend.apiKey}
-                                  onChange={(e) =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: {
-                                        ...prev.emailConfig,
-                                        resend: { ...prev.emailConfig.resend, apiKey: e.target.value },
-                                      },
-                                    }))
-                                  }
-                                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
-                                  className="text-sm"
-                                />
-                                <div className="space-y-2">
-                                  <p className="text-xs text-gray-500">
-                                    Obtenha sua API Key em{" "}
-                                    <a
-                                      href="https://resend.com/api-keys"
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      resend.com/api-keys
-                                    </a>
-                                  </p>
-
-                                  <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-                                    <div className="flex items-start gap-2">
-                                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-xs text-amber-800">
-                                        <p className="font-medium mb-1">⚠️ Domínio deve estar verificado no Resend</p>
-                                        <ul className="space-y-1 text-xs">
-                                          <li>• O email remetente deve usar um domínio verificado</li>
-                                          <li>
-                                            • Configure SPF e DKIM em{" "}
-                                            <a
-                                              href="https://resend.com/domains"
-                                              target="_blank"
-                                              className="underline"
-                                              rel="noreferrer"
-                                            >
-                                              resend.com/domains
-                                            </a>
-                                          </li>
-                                          <li>• Exemplo: se seu domínio é "empresa.com", use "noreply@empresa.com"</li>
-                                        </ul>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div className="bg-green-50 border border-green-200 rounded-md p-2">
-                                    <div className="flex items-center gap-2 text-xs text-green-800">
-                                      <Lock className="h-3 w-3" />
-                                      <span>API Key será criptografada e armazenada com segurança</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ) : (
-                          <Card>
-                            <CardHeader className="pb-2">
-                              <CardTitle className="text-sm">Configurações SMTP</CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                              {/* ... existing SMTP configuration ... */}
-                              <div className="space-y-1">
-                                <Label className="text-xs">Servidor SMTP</Label>
-                                <Input
-                                  value={design.emailConfig.smtp.host}
-                                  onChange={(e) =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: {
-                                        ...prev.emailConfig,
-                                        smtp: { ...prev.emailConfig.smtp, host: e.target.value },
-                                      },
-                                    }))
-                                  }
-                                  placeholder="smtp.example.com"
-                                  className="text-sm"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                  <Label className="text-xs">Porta</Label>
-                                  <Input
-                                    type="number"
-                                    value={design.emailConfig.smtp.port}
-                                    onChange={(e) =>
-                                      setDesign((prev) => ({
-                                        ...prev,
-                                        emailConfig: {
-                                          ...prev.emailConfig,
-                                          smtp: { ...prev.emailConfig.smtp, port: Number(e.target.value) },
-                                        },
-                                      }))
-                                    }
-                                    placeholder="587"
-                                    className="text-sm"
-                                  />
-                                </div>
-                                <div className="flex items-end pb-1">
-                                  <div className="flex items-center space-x-2">
-                                    <Switch
-                                      checked={design.emailConfig.smtp.secure}
-                                      onCheckedChange={(checked) =>
-                                        setDesign((prev) => ({
-                                          ...prev,
-                                          emailConfig: {
-                                            ...prev.emailConfig,
-                                            smtp: { ...prev.emailConfig.smtp, secure: checked },
-                                          },
-                                        }))
-                                      }
-                                    />
-                                    <Label className="text-xs">Usar TLS/SSL</Label>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Usuário/Login</Label>
-                                <Input
-                                  value={design.emailConfig.smtp.user}
-                                  onChange={(e) =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: {
-                                        ...prev.emailConfig,
-                                        smtp: { ...prev.emailConfig.smtp, user: e.target.value },
-                                      },
-                                    }))
-                                  }
-                                  placeholder="seu_usuario_smtp"
-                                  className="text-sm"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Senha</Label>
-                                <Input
-                                  type="password"
-                                  value={design.emailConfig.smtp.pass}
-                                  onChange={(e) =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: {
-                                        ...prev.emailConfig,
-                                        smtp: { ...prev.emailConfig.smtp, pass: e.target.value },
-                                      },
-                                    }))
-                                  }
-                                  placeholder="••••••••••••"
-                                  className="text-sm"
-                                />
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Shield className="h-4 w-4 text-green-600" />
+                              Configuração Resend (Segura)
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">API Key do Resend</Label>
+                              <Input
+                                type="password"
+                                value={design.emailConfig.resend.apiKey}
+                                onChange={(e) =>
+                                  setDesign((prev) => ({
+                                    ...prev,
+                                    emailConfig: {
+                                      ...prev.emailConfig,
+                                      resend: { ...prev.emailConfig.resend, apiKey: e.target.value },
+                                    },
+                                  }))
+                                }
+                                placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                className="text-sm"
+                              />
+                              <div className="space-y-2">
                                 <p className="text-xs text-gray-500">
-                                  Recomendamos o uso de uma senha de aplicativo específica.
+                                  Obtenha sua API Key em{" "}
+                                  <a
+                                    href="https://resend.com/api-keys"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    resend.com/api-keys
+                                  </a>
                                 </p>
+
+                                <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                    <div className="text-xs text-amber-800">
+                                      <p className="font-medium mb-1">⚠️ Domínio deve estar verificado no Resend</p>
+                                      <ul className="space-y-1 text-xs">
+                                        <li>• O email remetente deve usar um domínio verificado</li>
+                                        <li>
+                                          • Configure SPF e DKIM em{" "}
+                                          <a
+                                            href="https://resend.com/domains"
+                                            target="_blank"
+                                            className="underline"
+                                            rel="noreferrer"
+                                          >
+                                            resend.com/domains
+                                          </a>
+                                        </li>
+                                        <li>• Exemplo: se seu domínio é "empresa.com", use "noreply@empresa.com"</li>
+                                      </ul>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="bg-green-50 border border-green-200 rounded-md p-2">
+                                  <div className="flex items-center gap-2 text-xs text-green-800">
+                                    <Lock className="h-3 w-3" />
+                                    <span>API Key será criptografada e armazenada com segurança</span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex gap-2 pt-2">
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleTestSmtp("verify")}
-                                  disabled={isTestingSmtp}
-                                  className="w-full text-sm bg-transparent"
-                                >
-                                  {isTestingSmtp ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  ) : (
-                                    <Server className="h-4 w-4 mr-2" />
-                                  )}
-                                  {isTestingSmtp ? "Testando..." : "Testar Conexão"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleTestSmtp("send")}
-                                  disabled={isTestingSmtp}
-                                  className="w-full text-sm bg-transparent"
-                                >
-                                  {isTestingSmtp ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  ) : (
-                                    <Send className="h-4 w-4 mr-2" />
-                                  )}
-                                  {isTestingSmtp ? "Enviando..." : "Enviar Teste"}
-                                </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        )}
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                              <Button
+                                variant="outline"
+                                onClick={() => handleTestSmtp("verify")}
+                                disabled={isTestingSmtp}
+                                className="w-full text-sm bg-transparent"
+                              >
+                                {isTestingSmtp ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Server className="h-4 w-4 mr-2" />
+                                )}
+                                {isTestingSmtp ? "Testando..." : "Testar Conexão"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => handleTestSmtp("send")}
+                                disabled={isTestingSmtp}
+                                className="w-full text-sm bg-transparent"
+                              >
+                                {isTestingSmtp ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Send className="h-4 w-4 mr-2" />
+                                )}
+                                {isTestingSmtp ? "Enviando..." : "Enviar Teste"}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
                       </div>
                     )}
                   </CardContent>

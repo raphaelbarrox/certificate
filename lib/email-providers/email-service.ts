@@ -31,7 +31,7 @@ export class EmailService {
     const { config, to, subject, html, attachments } = options
 
     if (!config.enabled) {
-      console.log("[v0] [Email] Envio desativado")
+      console.log("🔕 [v0] [Email] Envio desativado")
       return { success: true }
     }
 
@@ -39,16 +39,16 @@ export class EmailService {
 
     try {
       console.log(
-        "[v0] [Email] 🚀 Iniciando envio:",
+        "🚀 [v0] [Email] Iniciando envio:",
         EmailSecurity.sanitizeForLog({
-          provider: config.provider,
+          provider: "resend",
           to,
           subject,
           attachmentCount: attachments?.length || 0,
         }),
       )
 
-      if (config.provider === "resend" && config.resend?.enabled && config.resend.apiKey) {
+      if (config.resend?.enabled && config.resend.apiKey) {
         const result = await this.sendWithResend({
           from: fromAddress,
           to,
@@ -58,13 +58,13 @@ export class EmailService {
           apiKey: config.resend.apiKey,
         })
 
-        console.log("[v0] [Email] 📊 Resultado Resend:", EmailSecurity.sanitizeForLog(result))
+        console.log("📊 [v0] [Email] Resultado Resend:", EmailSecurity.sanitizeForLog(result))
         return result
       } else {
-        throw new Error("❌ Apenas Resend é suportado. Configure o provedor Resend nas configurações de email.")
+        throw new Error("❌ Resend não configurado. Configure a API Key do Resend nas configurações de email.")
       }
     } catch (error) {
-      console.error("[v0] [Email] ❌ Erro no envio:", EmailSecurity.sanitizeForLog(error))
+      console.error("❌ [v0] [Email] Erro no envio:", EmailSecurity.sanitizeForLog(error))
       const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
       return { success: false, error: errorMessage }
     }
@@ -78,7 +78,7 @@ export class EmailService {
     attachments?: EmailAttachment[]
     apiKey: string
   }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    console.log(`[v0] [Email] 📤 Usando Resend para enviar para ${options.to}`)
+    console.log(`📤 [v0] [Email] Usando Resend para enviar para ${options.to}`)
     const resendProvider = new ResendProvider(options.apiKey)
     return await resendProvider.sendEmail({
       from: options.from,
@@ -91,15 +91,15 @@ export class EmailService {
 
   static async testConnection(config: EmailConfig): Promise<{ success: boolean; error?: string }> {
     try {
-      if (config.provider === "resend" && config.resend?.enabled && config.resend.apiKey) {
-        console.log("[v0] [Email] 🔍 Testando conexão Resend...")
+      if (config.resend?.enabled && config.resend.apiKey) {
+        console.log("🔍 [v0] [Email] Testando conexão Resend...")
         const resendProvider = new ResendProvider(config.resend.apiKey)
         return await resendProvider.verifyConnection()
       } else {
-        throw new Error("❌ Apenas Resend é suportado. Configure o provedor Resend.")
+        throw new Error("❌ Resend não configurado. Configure a API Key do Resend.")
       }
     } catch (error) {
-      console.error("[v0] [Email] ❌ Erro no teste de conexão:", EmailSecurity.sanitizeForLog(error))
+      console.error("❌ [v0] [Email] Erro no teste de conexão:", EmailSecurity.sanitizeForLog(error))
       const errorMessage = error instanceof Error ? error.message : "Erro na verificação"
       return { success: false, error: errorMessage }
     }
