@@ -12,7 +12,7 @@ interface EmailLog {
   id: string
   timestamp: string
   type: "certificate_issued" | "test_email" | "error" | "debug"
-  status: "success" | "error" | "pending" | "info"
+  status: "success" | "error" | "pending" | "info" | "warning"
   message: string
   details?: {
     recipient?: string
@@ -20,8 +20,24 @@ interface EmailLog {
     templateId?: string
     error?: string
     apiKeyStatus?: string
-    configStatus?: string
+    configStatus?: any
     duration?: number
+    attempts?: number
+    messageId?: string
+    hasFormDesign?: boolean
+    hasEmailConfig?: boolean
+    configEnabled?: any
+    hasResendConfig?: boolean
+    hasApiKey?: boolean
+    hasKeyHash?: boolean
+    configDetails?: any
+    suggestion?: string
+    enabledType?: string
+    availableFields?: string[]
+    pdfSize?: string
+    keyHash?: string
+    stack?: string
+    [key: string]: any
   }
 }
 
@@ -107,6 +123,8 @@ export default function EmailLogsMonitor({ templateId, isEmailEnabled }: EmailLo
         return <CheckCircle className="h-4 w-4 text-green-600" />
       case "error":
         return <AlertCircle className="h-4 w-4 text-red-600" />
+      case "warning":
+        return <AlertCircle className="h-4 w-4 text-yellow-600" />
       case "pending":
         return <Clock className="h-4 w-4 text-yellow-600" />
       default:
@@ -118,6 +136,7 @@ export default function EmailLogsMonitor({ templateId, isEmailEnabled }: EmailLo
     const variants = {
       success: "default",
       error: "destructive",
+      warning: "secondary",
       pending: "secondary",
       info: "outline",
     } as const
@@ -135,6 +154,185 @@ export default function EmailLogsMonitor({ templateId, isEmailEnabled }: EmailLo
       minute: "2-digit",
       second: "2-digit",
     })
+  }
+
+  const renderLogDetails = (details: EmailLog["details"]) => {
+    if (!details) return null
+
+    const renderValue = (value: any): string => {
+      if (typeof value === "object" && value !== null) {
+        return JSON.stringify(value, null, 2)
+      }
+      return String(value)
+    }
+
+    const importantFields = [
+      "recipient",
+      "certificateId",
+      "error",
+      "suggestion",
+      "apiKeyStatus",
+      "messageId",
+      "attempts",
+      "duration",
+      "pdfSize",
+    ]
+
+    const configFields = [
+      "hasFormDesign",
+      "hasEmailConfig",
+      "configEnabled",
+      "enabledType",
+      "hasResendConfig",
+      "hasApiKey",
+      "hasKeyHash",
+      "configDetails",
+    ]
+
+    const debugFields = Object.keys(details).filter(
+      (key) => !importantFields.includes(key) && !configFields.includes(key),
+    )
+
+    return (
+      <div className="text-xs space-y-2 ml-6 mt-2">
+        {/* Informações Importantes */}
+        {importantFields.some((field) => details[field] !== undefined) && (
+          <div className="bg-blue-50 border border-blue-200 rounded p-2">
+            <div className="font-medium text-blue-800 mb-1">📋 Informações Principais:</div>
+            <div className="space-y-1 text-blue-700">
+              {details.recipient && (
+                <div>
+                  📧 <strong>Destinatário:</strong> {details.recipient}
+                </div>
+              )}
+              {details.certificateId && (
+                <div>
+                  📄 <strong>Certificado ID:</strong> {details.certificateId}
+                </div>
+              )}
+              {details.messageId && (
+                <div>
+                  ✉️ <strong>Message ID:</strong> {details.messageId}
+                </div>
+              )}
+              {details.attempts && (
+                <div>
+                  🔄 <strong>Tentativas:</strong> {details.attempts}
+                </div>
+              )}
+              {details.duration && (
+                <div>
+                  ⏱️ <strong>Duração:</strong> {details.duration}ms
+                </div>
+              )}
+              {details.pdfSize && (
+                <div>
+                  📎 <strong>Tamanho PDF:</strong> {details.pdfSize}
+                </div>
+              )}
+              {details.apiKeyStatus && (
+                <div>
+                  🔑 <strong>Status API Key:</strong> {details.apiKeyStatus}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Configuração de Email */}
+        {configFields.some((field) => details[field] !== undefined) && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+            <div className="font-medium text-yellow-800 mb-1">⚙️ Configuração de Email:</div>
+            <div className="space-y-1 text-yellow-700">
+              {details.hasFormDesign !== undefined && (
+                <div>
+                  📋 <strong>Form Design:</strong> {details.hasFormDesign ? "✅ Existe" : "❌ Não encontrado"}
+                </div>
+              )}
+              {details.hasEmailConfig !== undefined && (
+                <div>
+                  📧 <strong>Email Config:</strong> {details.hasEmailConfig ? "✅ Existe" : "❌ Não encontrado"}
+                </div>
+              )}
+              {details.configEnabled !== undefined && (
+                <div>
+                  🔘 <strong>Email Ativado:</strong> {String(details.configEnabled)} (
+                  {details.enabledType || typeof details.configEnabled})
+                </div>
+              )}
+              {details.hasResendConfig !== undefined && (
+                <div>
+                  🔧 <strong>Resend Config:</strong> {details.hasResendConfig ? "✅ Configurado" : "❌ Não configurado"}
+                </div>
+              )}
+              {details.hasApiKey !== undefined && (
+                <div>
+                  🔑 <strong>API Key:</strong> {details.hasApiKey ? "✅ Presente" : "❌ Ausente"}
+                </div>
+              )}
+              {details.hasKeyHash !== undefined && (
+                <div>
+                  🔐 <strong>Key Hash:</strong> {details.hasKeyHash ? "✅ Presente" : "❌ Ausente"}
+                </div>
+              )}
+              {details.configDetails && (
+                <div className="mt-2">
+                  <div className="font-medium">📝 Detalhes da Configuração:</div>
+                  <pre className="bg-yellow-100 p-2 rounded text-xs mt-1 overflow-x-auto">
+                    {renderValue(details.configDetails)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Erro e Sugestão */}
+        {(details.error || details.suggestion) && (
+          <div className="bg-red-50 border border-red-200 rounded p-2">
+            {details.error && (
+              <div className="text-red-700 mb-2">
+                <div className="font-medium text-red-800">❌ Erro:</div>
+                <div className="mt-1">{details.error}</div>
+              </div>
+            )}
+            {details.suggestion && (
+              <div className="text-orange-700">
+                <div className="font-medium text-orange-800">💡 Sugestão:</div>
+                <div className="mt-1">{details.suggestion}</div>
+              </div>
+            )}
+            {details.stack && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-red-600 font-medium">🔍 Stack Trace</summary>
+                <pre className="bg-red-100 p-2 rounded text-xs mt-1 overflow-x-auto whitespace-pre-wrap">
+                  {details.stack}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Outros Detalhes de Debug */}
+        {debugFields.length > 0 && (
+          <details className="bg-gray-50 border border-gray-200 rounded p-2">
+            <summary className="cursor-pointer font-medium text-gray-700">
+              🔧 Detalhes Técnicos ({debugFields.length})
+            </summary>
+            <div className="mt-2 space-y-1 text-gray-600">
+              {debugFields.map((key) => (
+                <div key={key} className="flex flex-col">
+                  <span className="font-medium">{key}:</span>
+                  <pre className="bg-gray-100 p-1 rounded text-xs mt-1 overflow-x-auto">
+                    {renderValue(details[key])}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    )
   }
 
   if (!isEmailEnabled) {
@@ -243,7 +441,7 @@ export default function EmailLogsMonitor({ templateId, isEmailEnabled }: EmailLo
               ) : (
                 <div className="space-y-3">
                   {logs.map((log) => (
-                    <div key={log.id} className="border rounded-lg p-3 bg-gray-50">
+                    <div key={log.id} className="border rounded-lg p-3 bg-white shadow-sm">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
                           {getStatusIcon(log.status)}
@@ -255,16 +453,7 @@ export default function EmailLogsMonitor({ templateId, isEmailEnabled }: EmailLo
                         </div>
                       </div>
 
-                      {log.details && (
-                        <div className="text-xs text-gray-600 space-y-1 ml-6">
-                          {log.details.recipient && <div>📧 Destinatário: {log.details.recipient}</div>}
-                          {log.details.certificateId && <div>📄 Certificado ID: {log.details.certificateId}</div>}
-                          {log.details.apiKeyStatus && <div>🔑 Status API Key: {log.details.apiKeyStatus}</div>}
-                          {log.details.configStatus && <div>⚙️ Status Config: {log.details.configStatus}</div>}
-                          {log.details.duration && <div>⏱️ Duração: {log.details.duration}ms</div>}
-                          {log.details.error && <div className="text-red-600">❌ Erro: {log.details.error}</div>}
-                        </div>
-                      )}
+                      {renderLogDetails(log.details)}
                     </div>
                   ))}
                 </div>

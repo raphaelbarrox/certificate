@@ -44,6 +44,17 @@ async function sendCertificateEmail(
   const startTime = Date.now()
   const emailConfig = template.form_design?.emailConfig
 
+  console.log(`🔍 [v0] [Email Debug] Template completo:`, {
+    templateId: template.id,
+    hasFormDesign: !!template.form_design,
+    formDesignKeys: template.form_design ? Object.keys(template.form_design) : [],
+    hasEmailConfig: !!emailConfig,
+    emailConfigKeys: emailConfig ? Object.keys(emailConfig) : [],
+    enabledValue: emailConfig?.enabled,
+    enabledType: typeof emailConfig?.enabled,
+    rawEmailConfig: emailConfig,
+  })
+
   await logEmailEvent(
     template.id,
     template.user_id,
@@ -52,21 +63,81 @@ async function sendCertificateEmail(
     "Iniciando processo de envio de certificado",
     {
       certificateId: certificateNumber,
-      configEnabled: !!emailConfig?.enabled,
+      templateId: template.id,
+      hasFormDesign: !!template.form_design,
+      hasEmailConfig: !!emailConfig,
+      configEnabled: emailConfig?.enabled,
       hasResendConfig: !!emailConfig?.resend,
+      hasApiKey: !!emailConfig?.resend?.apiKey,
+      hasKeyHash: !!emailConfig?.resend?.keyHash,
+      configDetails: emailConfig
+        ? {
+            enabled: emailConfig.enabled,
+            subject: emailConfig.subject ? "✓ Definido" : "✗ Não definido",
+            body: emailConfig.body ? "✓ Definido" : "✗ Não definido",
+            resendConfigExists: !!emailConfig.resend,
+          }
+        : "Configuração não encontrada",
     },
   )
 
-  if (!emailConfig || !emailConfig.enabled) {
-    console.log(`🔕 [v0] [Email] Envio desativado para o template ${template.id}.`)
-    await logEmailEvent(
-      template.id,
-      template.user_id,
-      "certificate_issued",
-      "info",
-      "Envio de email desativado na configuração do template",
-      { certificateId: certificateNumber },
-    )
+  if (!emailConfig) {
+    const errorMsg = "Configuração de email não encontrada no template"
+    console.log(`🔕 [v0] [Email] ${errorMsg} ${template.id}`)
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      templateId: template.id,
+      hasFormDesign: !!template.form_design,
+      suggestion: "Ative o email nas configurações do template",
+    })
+    return
+  }
+
+  if (!emailConfig.enabled) {
+    const errorMsg = "Envio de email desativado na configuração do template"
+    console.log(`🔕 [v0] [Email] ${errorMsg} ${template.id}`)
+    console.log(`🔍 [v0] [Email Debug] Detalhes do enabled:`, {
+      enabled: emailConfig.enabled,
+      enabledType: typeof emailConfig.enabled,
+      enabledString: String(emailConfig.enabled),
+      enabledBoolean: Boolean(emailConfig.enabled),
+      strictCheck: emailConfig.enabled === true,
+      truthyCheck: !!emailConfig.enabled,
+    })
+
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "warning", errorMsg, {
+      certificateId: certificateNumber,
+      templateId: template.id,
+      configExists: true,
+      enabled: emailConfig.enabled,
+      enabledType: typeof emailConfig.enabled,
+      suggestion: "Marque a opção 'Ativar envio de email' nas configurações do template",
+    })
+    return
+  }
+
+  if (!emailConfig.resend) {
+    const errorMsg = "Configuração do Resend não encontrada"
+    console.log(`🔕 [v0] [Email] ${errorMsg} ${template.id}`)
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      templateId: template.id,
+      emailEnabled: true,
+      suggestion: "Configure a API Key do Resend nas configurações do template",
+    })
+    return
+  }
+
+  if (!emailConfig.resend.apiKey && !emailConfig.resend.keyHash) {
+    const errorMsg = "API Key do Resend não configurada"
+    console.log(`🔕 [v0] [Email] ${errorMsg} ${template.id}`)
+    await logEmailEvent(template.id, template.user_id, "certificate_issued", "error", errorMsg, {
+      certificateId: certificateNumber,
+      templateId: template.id,
+      emailEnabled: true,
+      resendConfigExists: true,
+      suggestion: "Adicione sua API Key do Resend nas configurações do template",
+    })
     return
   }
 
