@@ -39,15 +39,9 @@ import {
   Server,
   Copy,
   Loader2,
-  Shield,
-  AlertTriangle,
-  Lock,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
-import { useAuth } from "@/components/auth-provider"
-import { saveApiKeyAction } from "@/app/actions/email-actions"
-import EmailLogsMonitor from "./email-logs-monitor"
 
 interface FormField {
   id: string
@@ -74,7 +68,6 @@ interface SpecialOffer {
 
 interface EmailConfig {
   enabled: boolean
-  provider: "smtp" | "resend"
   senderName: string
   senderEmail: string
   subject: string
@@ -85,11 +78,6 @@ interface EmailConfig {
     user: string
     pass: string
     secure: boolean
-  }
-  resend: {
-    enabled: boolean
-    apiKey: string
-    keyHash: string | undefined
   }
 }
 
@@ -111,10 +99,9 @@ interface FormDesign {
 }
 
 interface FormDesignerProps {
-  onStateChange: (data: { fields: FormField[]; design: FormDesign }) => void
-  initialData?: { fields: FormField[]; design: FormDesign }
+  onStateChange: (formData: { fields: FormField[]; design: FormDesign }) => void
+  initialData?: { fields: FormField[]; design: FormDesign } | null
   availablePlaceholders?: Array<{ id: string; label: string; type?: "text" | "image" }>
-  templateId?: string
 }
 
 const fieldTypeIcons = {
@@ -144,11 +131,10 @@ const defaultDesign: FormDesign = {
   footerText: "Powered by CertGen • Certificados digitais profissionais",
   emailConfig: {
     enabled: false,
-    provider: "resend",
     senderName: "",
     senderEmail: "",
     subject: "Seu certificado está pronto!",
-    body: `<p>Olá {{nome_completo}},</p><p>Seu certificado foi emitido com sucesso. Você pode fazer o download através do anexo ou clicando no link abaixo:</p><p><a href="{{certificate_link}}">Visualizar Certificado Online</a></p><p>Número do Certificado: {{certificate_id}}</p>`,
+    body: `<p>Olá {{nome_completo}},</p><p>Seu certificado foi emitido com sucesso. Clique no link abaixo para fazer o download:</p><p><a href="{{certificate_link}}">Baixar Certificado</a></p><p>Número do Certificado: {{certificate_id}}</p>`,
     smtp: {
       host: "",
       port: 587,
@@ -156,20 +142,10 @@ const defaultDesign: FormDesign = {
       pass: "",
       secure: false,
     },
-    resend: {
-      enabled: true,
-      apiKey: "",
-      keyHash: undefined,
-    },
   },
 }
 
-export default function FormDesigner({
-  onStateChange,
-  initialData,
-  availablePlaceholders = [],
-  templateId,
-}: FormDesignerProps) {
+export default function FormDesigner({ onStateChange, initialData, availablePlaceholders = [] }: FormDesignerProps) {
   const defaultFields = useMemo(
     () => [
       {
@@ -203,8 +179,6 @@ export default function FormDesigner({
   const { toast } = useToast()
   const [isInitialized, setIsInitialized] = useState(false)
   const [isTestingSmtp, setIsTestingSmtp] = useState(false)
-  const [isSavingApiKey, setIsSavingApiKey] = useState(false)
-  const { user } = useAuth()
 
   // Drag and drop state
   const dragField = useRef<number | null>(null)
@@ -254,110 +228,18 @@ export default function FormDesigner({
     }
   }, [editingField])
 
-  const handleSaveApiKey = async (apiKey: string) => {
-    if (!user) {
-      toast({
-        title: "Erro de autenticação",
-        description: "Usuário não encontrado. Faça login novamente.",
-        variant: "destructive",
-      })
-      return false
-    }
-
-    if (!apiKey || apiKey.trim() === "") {
-      toast({
-        title: "API Key necessária",
-        description: "Por favor, preencha a API Key do Resend.",
-        variant: "destructive",
-      })
-      return false
-    }
-
-    if (!apiKey.startsWith("re_")) {
-      toast({
-        title: "API Key inválida",
-        description: "A API Key do Resend deve começar com 're_'.",
-        variant: "destructive",
-      })
-      return false
-    }
-
-    setIsSavingApiKey(true)
-    try {
-      console.log("[v0] [API Key] 🔐 Salvando API Key de forma segura...")
-
-      const result = await saveApiKeyAction(user.id, "resend", apiKey)
-
-      if (!result.success) {
-        throw new Error(result.error)
-      }
-
-      console.log("[v0] [API Key] ✅ API Key salva com sucesso, hash:", result.keyHash?.substring(0, 8) + "...")
-
-      const updatedDesign = {
-        ...design,
-        emailConfig: {
-          ...design.emailConfig,
-          resend: {
-            ...design.emailConfig.resend,
-            keyHash: result.keyHash!,
-            apiKey: "", // Limpar a chave do estado local por segurança
-          },
-        },
-      }
-
-      setDesign(updatedDesign)
-
-      if (onStateChange) {
-        onStateChange(updatedDesign)
-      }
-
-      toast({
-        title: "✅ API Key salva com segurança",
-        description: "Sua chave foi criptografada e armazenada no banco de dados.",
-      })
-
-      return true
-    } catch (error: any) {
-      console.error("[v0] [API Key] ❌ Erro ao salvar:", error)
-      toast({
-        title: "Erro ao salvar API Key",
-        description: error.message || "Erro desconhecido ao salvar a chave.",
-        variant: "destructive",
-      })
-      return false
-    } finally {
-      setIsSavingApiKey(false)
-    }
-  }
-
   const handleTestSmtp = async (action: "verify" | "send") => {
-    console.log(`[v0] [Email Test] 🚀 Iniciando teste de ${action}`)
-
-    const { resend, senderEmail } = design.emailConfig
-
-    const hasApiKey = resend.keyHash || (resend.apiKey && resend.apiKey.trim() !== "")
-
-    if (!hasApiKey) {
-      console.log("[v0] [Email Test] ❌ API Key não encontrada")
+    const { smtp, senderEmail } = design.emailConfig
+    if (!smtp.host || !smtp.port || !smtp.user || !smtp.pass) {
       toast({
-        title: "API Key Necessária",
-        description: "Por favor, preencha e salve a API Key do Resend antes de testar.",
+        title: "Campos Obrigatórios",
+        description: "Por favor, preencha todos os campos de configuração SMTP.",
         variant: "destructive",
       })
       return
     }
 
-    if (!resend.keyHash && resend.apiKey) {
-      console.log("[v0] [Email Test] 💾 Salvando API Key antes do teste...")
-      const saved = await handleSaveApiKey(resend.apiKey)
-      if (!saved) {
-        return // Erro já foi mostrado na função handleSaveApiKey
-      }
-    }
-
-    if (action === "send" && (!senderEmail || senderEmail.trim() === "")) {
-      console.log("[v0] [Email Test] ❌ Email remetente vazio")
+    if (action === "send" && !senderEmail) {
       toast({
         title: "Email do Remetente Necessário",
         description: "Por favor, preencha o campo 'Email do Remetente' para enviar um teste.",
@@ -366,73 +248,36 @@ export default function FormDesigner({
       return
     }
 
-    // Validação de domínio público
-    if (senderEmail) {
-      const emailDomain = senderEmail.split("@")[1]?.toLowerCase()
-      const publicDomains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com"]
-
-      if (publicDomains.includes(emailDomain)) {
-        console.log(`[v0] [Email Test] ❌ Domínio público detectado: ${emailDomain}`)
-        toast({
-          title: "Domínio Não Permitido",
-          description: `Resend não permite emails de provedores públicos como ${emailDomain}. Use um domínio próprio verificado.`,
-          variant: "destructive",
-          duration: 8000,
-        })
-        return
-      }
-    }
-
     setIsTestingSmtp(true)
     try {
-      console.log(`[v0] [Email Test] 📡 Enviando requisição para API...`)
-
-      const testConfig = {
-        ...design.emailConfig,
-        provider: "resend" as const,
-        resend: {
-          enabled: true,
-          keyHash: design.emailConfig.resend.keyHash,
-        },
-      }
-
       const response = await fetch("/api/templates/test-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          config: testConfig,
-          userId: user?.id, // Enviar userId para descriptografar a chave
+          config: design.emailConfig,
         }),
       })
 
-      console.log(`[v0] [Email Test] 📡 Resposta recebida: ${response.status}`)
-
-      let result
-      try {
-        const responseText = await response.text()
-        console.log(`[v0] [Email Test] 📄 Texto da resposta: ${responseText}`)
-        result = JSON.parse(responseText)
-      } catch (parseError) {
-        console.log(`[v0] [Email Test] ❌ Erro ao fazer parse do JSON: ${parseError.message}`)
-        throw new Error(`Erro interno do servidor. Resposta não é JSON válido. Status: ${response.status}`)
-      }
+      const result = await response.json()
 
       if (!response.ok) {
-        throw new Error(result.error || `Erro HTTP ${response.status}`)
+        throw new Error(result.error || "Falha no teste. Verifique os logs do servidor.")
       }
 
-      console.log(`[v0] [Email Test] ✅ Sucesso:`, result.message)
       toast({
-        title: action === "verify" ? "✅ Conexão Verificada" : "✅ Email Enviado",
+        title: "Sucesso!",
         description: result.message,
+        variant: "default",
       })
-    } catch (error: any) {
-      console.log(`[v0] [Email Test] ❌ Erro na ação '${action}': ${error.message}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ocorreu um erro desconhecido."
+      console.error(`[SMTP Debug] Erro na ação '${action}':`, message)
       toast({
-        title: `Erro no ${action === "verify" ? "teste de conexão" : "envio de email"}`,
-        description: error.message,
+        title: "Erro no Teste SMTP",
+        description: message,
         variant: "destructive",
+        duration: 9000,
       })
     } finally {
       setIsTestingSmtp(false)
@@ -470,7 +315,7 @@ export default function FormDesigner({
       price: newOffer.price,
       priceText: newOffer.priceText || "por apenas",
       buttonText: "Comprar Agora",
-      buttonUrl: "#",
+      buttonUrl: newOffer.buttonUrl || "#",
     }
 
     setDesign((prev) => ({
@@ -735,7 +580,7 @@ export default function FormDesigner({
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="flex h-full bg-gray-50">
       {/* Sidebar - Editor */}
       <div className="w-[450px] bg-white border-r flex flex-col">
         <div className="p-4 border-b">
@@ -1131,7 +976,7 @@ export default function FormDesigner({
                   <CardHeader>
                     <CardTitle className="text-sm">Envio Automático de Email</CardTitle>
                     <p className="text-xs text-gray-600">
-                      Envie o certificado por email automaticamente após a emissão com anexo PDF.
+                      Envie o certificado por email automaticamente após a emissão.
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1150,27 +995,6 @@ export default function FormDesigner({
 
                     {design.emailConfig.enabled && (
                       <div className="space-y-4 pt-4 border-t">
-                        <Card>
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm">Provedor de Email</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="flex items-center justify-center p-4 bg-green-50 border border-green-200 rounded-lg">
-                              <div className="flex items-center space-x-3">
-                                <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                                  <div className="w-2 h-2 bg-white rounded-full"></div>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium text-green-800">Resend (Recomendado)</Label>
-                                  <p className="text-xs text-green-600 mt-1">
-                                    Resend oferece melhor entregabilidade e anexos automáticos de PDF.
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
                         <Card>
                           <CardHeader className="pb-2">
                             <CardTitle className="text-sm">Conteúdo do Email</CardTitle>
@@ -1202,7 +1026,7 @@ export default function FormDesigner({
                                       emailConfig: { ...prev.emailConfig, senderEmail: e.target.value },
                                     }))
                                   }
-                                  placeholder="contato@seudominio.com"
+                                  placeholder="contato@suaempresa.com"
                                   className="text-sm"
                                 />
                               </div>
@@ -1234,9 +1058,6 @@ export default function FormDesigner({
                                 className="min-h-[150px] text-sm font-mono"
                                 rows={8}
                               />
-                              <p className="text-xs text-gray-500">
-                                O PDF do certificado será anexado automaticamente ao email.
-                              </p>
                             </div>
                             <div>
                               <Label className="text-xs font-medium">Tags Disponíveis</Label>
@@ -1262,155 +1083,131 @@ export default function FormDesigner({
 
                         <Card>
                           <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Shield className="h-4 w-4 text-green-600" />
-                              Configuração Resend (Segura)
-                            </CardTitle>
+                            <CardTitle className="text-sm">Configurações SMTP</CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-3">
                             <div className="space-y-1">
-                              <Label className="text-xs">API Key do Resend</Label>
-                              <div className="flex gap-2">
+                              <Label className="text-xs">Servidor SMTP</Label>
+                              <Input
+                                value={design.emailConfig.smtp.host}
+                                onChange={(e) =>
+                                  setDesign((prev) => ({
+                                    ...prev,
+                                    emailConfig: {
+                                      ...prev.emailConfig,
+                                      smtp: { ...prev.emailConfig.smtp, host: e.target.value },
+                                    },
+                                  }))
+                                }
+                                placeholder="smtp.example.com"
+                                className="text-sm"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Porta</Label>
                                 <Input
-                                  type="password"
-                                  value={design.emailConfig.resend.apiKey}
+                                  type="number"
+                                  value={design.emailConfig.smtp.port}
                                   onChange={(e) =>
                                     setDesign((prev) => ({
                                       ...prev,
                                       emailConfig: {
                                         ...prev.emailConfig,
-                                        resend: { ...prev.emailConfig.resend, apiKey: e.target.value },
+                                        smtp: { ...prev.emailConfig.smtp, port: Number(e.target.value) },
                                       },
                                     }))
                                   }
-                                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                  placeholder="587"
                                   className="text-sm"
-                                  disabled={!!design.emailConfig.resend.keyHash}
                                 />
-                                {design.emailConfig.resend.apiKey && !design.emailConfig.resend.keyHash && (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleSaveApiKey(design.emailConfig.resend.apiKey)}
-                                    disabled={isSavingApiKey}
-                                  >
-                                    {isSavingApiKey ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Save className="h-4 w-4" />
-                                    )}
-                                  </Button>
-                                )}
                               </div>
-
-                              {design.emailConfig.resend.keyHash ? (
-                                <div className="bg-green-50 border border-green-200 rounded-md p-2">
-                                  <div className="flex items-center gap-2 text-xs text-green-800">
-                                    <Lock className="h-3 w-3" />
-                                    <span>✅ API Key salva e criptografada com segurança</span>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() =>
-                                        setDesign((prev) => ({
-                                          ...prev,
-                                          emailConfig: {
-                                            ...prev.emailConfig,
-                                            resend: { ...prev.emailConfig.resend, keyHash: undefined, apiKey: "" },
-                                          },
-                                        }))
-                                      }
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
+                              <div className="flex items-end pb-1">
+                                <div className="flex items-center space-x-2">
+                                  <Switch
+                                    checked={design.emailConfig.smtp.secure}
+                                    onCheckedChange={(checked) =>
+                                      setDesign((prev) => ({
+                                        ...prev,
+                                        emailConfig: {
+                                          ...prev.emailConfig,
+                                          smtp: { ...prev.emailConfig.smtp, secure: checked },
+                                        },
+                                      }))
+                                    }
+                                  />
+                                  <Label className="text-xs">Usar TLS/SSL</Label>
                                 </div>
-                              ) : (
-                                <div className="space-y-2">
-                                  <p className="text-xs text-gray-500">
-                                    Obtenha sua API Key em{" "}
-                                    <a
-                                      href="https://resend.com/api-keys"
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      resend.com/api-keys
-                                    </a>
-                                  </p>
-
-                                  <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-                                    <div className="flex items-start gap-2">
-                                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                                      <div className="text-xs text-amber-800">
-                                        <p className="font-medium mb-1">⚠️ Domínio deve estar verificado no Resend</p>
-                                        <ul className="space-y-1 text-xs">
-                                          <li>• O email remetente deve usar um domínio verificado</li>
-                                          <li>
-                                            • Configure SPF e DKIM em{" "}
-                                            <a
-                                              href="https://resend.com/domains"
-                                              target="_blank"
-                                              className="underline"
-                                              rel="noreferrer"
-                                            >
-                                              resend.com/domains
-                                            </a>
-                                          </li>
-                                          <li>• Exemplo: se seu domínio é "empresa.com", use "noreply@empresa.com"</li>
-                                        </ul>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div className="bg-blue-50 border border-blue-200 rounded-md p-2">
-                                    <div className="flex items-center gap-2 text-xs text-blue-800">
-                                      <Shield className="h-3 w-3" />
-                                      <span>💡 Clique em "Salvar" para criptografar sua API Key</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
+                              </div>
                             </div>
-
+                            <div className="space-y-1">
+                              <Label className="text-xs">Usuário/Login</Label>
+                              <Input
+                                value={design.emailConfig.smtp.user}
+                                onChange={(e) =>
+                                  setDesign((prev) => ({
+                                    ...prev,
+                                    emailConfig: {
+                                      ...prev.emailConfig,
+                                      smtp: { ...prev.emailConfig.smtp, user: e.target.value },
+                                    },
+                                  }))
+                                }
+                                placeholder="seu_usuario_smtp"
+                                className="text-sm"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Senha</Label>
+                              <Input
+                                type="password"
+                                value={design.emailConfig.smtp.pass}
+                                onChange={(e) =>
+                                  setDesign((prev) => ({
+                                    ...prev,
+                                    emailConfig: {
+                                      ...prev.emailConfig,
+                                      smtp: { ...prev.emailConfig.smtp, pass: e.target.value },
+                                    },
+                                  }))
+                                }
+                                placeholder="••••••••••••"
+                                className="text-sm"
+                              />
+                              <p className="text-xs text-gray-500">
+                                Recomendamos o uso de uma senha de aplicativo específica.
+                              </p>
+                            </div>
                             <div className="flex gap-2 pt-2">
                               <Button
                                 variant="outline"
                                 onClick={() => handleTestSmtp("verify")}
-                                disabled={
-                                  isTestingSmtp ||
-                                  (!design.emailConfig.resend.keyHash && !design.emailConfig.resend.apiKey)
-                                }
-                                size="sm"
+                                disabled={isTestingSmtp}
+                                className="w-full text-sm bg-transparent"
                               >
                                 {isTestingSmtp ? (
-                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 ) : (
                                   <Server className="h-4 w-4 mr-2" />
                                 )}
-                                Testar Conexão
+                                {isTestingSmtp ? "Testando..." : "Testar Conexão"}
                               </Button>
                               <Button
+                                variant="outline"
                                 onClick={() => handleTestSmtp("send")}
-                                disabled={
-                                  isTestingSmtp ||
-                                  (!design.emailConfig.resend.keyHash && !design.emailConfig.resend.apiKey)
-                                }
-                                size="sm"
+                                disabled={isTestingSmtp}
+                                className="w-full text-sm bg-transparent"
                               >
                                 {isTestingSmtp ? (
-                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 ) : (
                                   <Send className="h-4 w-4 mr-2" />
                                 )}
-                                Enviar Teste
+                                {isTestingSmtp ? "Enviando..." : "Enviar Teste"}
                               </Button>
                             </div>
                           </CardContent>
                         </Card>
-
-                        {templateId && templateId !== "preview" && design.emailConfig.enabled && (
-                          <EmailLogsMonitor templateId={templateId} isEmailEnabled={design.emailConfig.enabled} />
-                        )}
                       </div>
                     )}
                   </CardContent>
@@ -1597,7 +1394,7 @@ function FieldEditor({
               <Label className="text-xs">Ligar a uma Tag de Texto</Label>
               <Select
                 value={field.placeholderId || "none"}
-                onChange={(value) => setField((prev) => ({ ...prev, placeholderId: value }))}
+                onValueChange={(value) => setField((prev) => ({ ...prev, placeholderId: value }))}
               >
                 <SelectTrigger className="text-sm">
                   <SelectValue placeholder="Selecione uma tag para vincular" />
@@ -1619,7 +1416,7 @@ function FieldEditor({
               <Label className="text-xs">Ligar a uma Tag de Imagem</Label>
               <Select
                 value={field.placeholderId || "none"}
-                onChange={(value) => setField((prev) => ({ ...prev, placeholderId: value }))}
+                onValueChange={(value) => setField((prev) => ({ ...prev, placeholderId: value }))}
               >
                 <SelectTrigger className="text-sm">
                   <SelectValue placeholder="Selecione uma tag de imagem" />

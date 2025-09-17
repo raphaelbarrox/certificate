@@ -418,7 +418,6 @@ export default function EditTemplatePage({ params }: { params: { id: string } })
                 initialData={template.form_design}
                 availablePlaceholders={template.template_data?.placeholders || template.placeholders || []}
                 onStateChange={handleFormStateChange}
-                templateId={params.id}
               />
             </div>
           </TabsContent>

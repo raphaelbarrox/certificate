@@ -65,7 +65,7 @@ export function CertificateIssueForm({
 
   const defaultFields: FormField[] = [
     {
-      id: "email", // Mudando de "default_email" para "email" para consistência
+      id: "default_email",
       type: "email",
       label: "Seu melhor e-mail",
       description: "Usaremos este e-mail para enviar o certificado e para contato.",
@@ -73,7 +73,7 @@ export function CertificateIssueForm({
       isDefault: true,
     },
     {
-      id: "whatsapp", // Mudando de "default_whatsapp" para "whatsapp" para consistência
+      id: "default_whatsapp",
       type: "tel",
       label: "WhatsApp (com DDD)",
       description: "Para comunicações importantes sobre seu certificado.",

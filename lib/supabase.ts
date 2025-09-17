@@ -53,22 +53,16 @@ export type Database = {
             footerText: string
             emailConfig?: {
               enabled: boolean
-              provider: "smtp" | "resend"
               senderName: string
               senderEmail: string
               subject: string
               body: string
-              smtp?: {
+              smtp: {
                 host: string
                 port: number
                 user: string
                 pass: string
                 secure: boolean
-              }
-              resend?: {
-                enabled: boolean
-                apiKey: string
-                keyHash?: string // Adicionado keyHash para suporte a chaves criptografadas
               }
             }
           } | null
@@ -101,22 +95,16 @@ export type Database = {
             footerText: string
             emailConfig?: {
               enabled: boolean
-              provider: "smtp" | "resend"
               senderName: string
               senderEmail: string
               subject: string
               body: string
-              smtp?: {
+              smtp: {
                 host: string
                 port: number
                 user: string
                 pass: string
                 secure: boolean
-              }
-              resend?: {
-                enabled: boolean
-                apiKey: string
-                keyHash?: string // Adicionado keyHash para suporte a chaves criptografadas
               }
             }
           } | null
@@ -149,22 +137,16 @@ export type Database = {
             footerText: string
             emailConfig?: {
               enabled: boolean
-              provider: "smtp" | "resend"
               senderName: string
               senderEmail: string
               subject: string
               body: string
-              smtp?: {
+              smtp: {
                 host: string
                 port: number
                 user: string
                 pass: string
                 secure: boolean
-              }
-              resend?: {
-                enabled: boolean
-                apiKey: string
-                keyHash?: string // Adicionado keyHash para suporte a chaves criptografadas
               }
             }
           } | null
