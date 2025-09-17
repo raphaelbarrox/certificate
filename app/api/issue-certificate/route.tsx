@@ -19,19 +19,19 @@ async function sendCertificateEmail(
 ) {
   const emailConfig = template.form_design?.emailConfig
   if (!emailConfig || !emailConfig.enabled) {
-    console.log(`[Email] Envio desativado para o template ${template.id}.`)
+    console.log(`[v0] [Email] Envio desativado para o template ${template.id}.`)
     return
   }
 
   const recipientEmail = recipientData.default_email || recipientData.email
 
   if (!recipientEmail) {
-    console.error(`[Email] Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
+    console.error(`[v0] [Email] Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
     return
   }
 
   try {
-    console.log(`[Email] Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
+    console.log(`[v0] [Email] Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
 
     // Replace placeholders
     let finalBody = emailConfig.body
@@ -56,22 +56,30 @@ async function sendCertificateEmail(
       contentType: "application/pdf",
     }
 
-    const result = await EmailService.sendEmail({
-      to: recipientEmail,
-      subject: finalSubject,
-      html: finalBody,
-      attachments: [pdfAttachment],
-      config: emailConfig,
-    })
+    const result = await EmailService.sendEmailWithRetry(
+      {
+        to: recipientEmail,
+        subject: finalSubject,
+        html: finalBody,
+        attachments: [pdfAttachment],
+        config: emailConfig,
+      },
+      3,
+    )
 
     if (result.success) {
-      console.log(`[Email] Mensagem enviada com sucesso. ID: ${result.messageId}`)
+      console.log(
+        `[v0] [Email] Mensagem enviada com sucesso após ${result.attempts} tentativa(s). ID: ${result.messageId}`,
+      )
     } else {
-      console.error(`[Email] Falha no envio: ${result.error}`)
+      console.error(`[v0] [Email] Falha no envio após ${result.attempts} tentativas: ${result.error}`)
     }
   } catch (error) {
     // Log the error but do not throw, to avoid breaking the main flow
-    console.error(`[Email] Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`, error)
+    console.error(
+      `[v0] [Email] Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`,
+      error,
+    )
   }
 }
 
