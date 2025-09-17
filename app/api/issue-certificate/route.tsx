@@ -17,13 +17,19 @@ async function sendCertificateEmail(
   pdfUrl: string,
   pdfBytes: ArrayBuffer,
 ) {
+  console.log(`🔍 [v0] [Email Debug] Verificando configuração de email para template ${template.id}`)
+  console.log(`🔍 [v0] [Email Debug] Template form_design:`, template.form_design ? "existe" : "não existe")
+  console.log(`🔍 [v0] [Email Debug] EmailConfig:`, template.form_design?.emailConfig || "não configurado")
+
   const emailConfig = template.form_design?.emailConfig
   if (!emailConfig || !emailConfig.enabled) {
     console.log(`🔕 [v0] [Email] Envio desativado para o template ${template.id}.`)
+    console.log(
+      `🔍 [v0] [Email Debug] Motivo: ${!emailConfig ? "emailConfig não existe" : "emailConfig.enabled = false"}`,
+    )
     return
   }
 
-  // Priorizar 'email' (campo padrão do formulário) ao invés de 'default_email'
   const recipientEmail = recipientData.email || recipientData.default_email
 
   console.log(`🔍 [v0] [Email Debug] Dados do destinatário:`, {
@@ -51,9 +57,39 @@ async function sendCertificateEmail(
   try {
     console.log(`🚀 [v0] [Email] ✅ Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
 
+    const finalEmailConfig = {
+      enabled: true,
+      provider: "resend" as const,
+      senderName: emailConfig.senderName || "Certificados",
+      senderEmail: emailConfig.senderEmail || "contact@therapist.international",
+      subject: emailConfig.subject || "Seu certificado está pronto!",
+      body:
+        emailConfig.body ||
+        `
+        <h2>Parabéns! Seu certificado foi gerado com sucesso.</h2>
+        <p>Olá {{nome}},</p>
+        <p>Seu certificado foi gerado e está anexado neste email.</p>
+        <p>Número do certificado: {{certificate_id}}</p>
+        <p>Atenciosamente,<br>Equipe de Certificados</p>
+      `,
+      resend: {
+        enabled: true,
+        apiKey: emailConfig.resend?.apiKey || process.env.RESEND_API_KEY || "",
+      },
+    }
+
+    console.log(`🔍 [v0] [Email Debug] Configuração final:`, {
+      enabled: finalEmailConfig.enabled,
+      provider: finalEmailConfig.provider,
+      senderName: finalEmailConfig.senderName,
+      senderEmail: finalEmailConfig.senderEmail,
+      hasApiKey: !!finalEmailConfig.resend.apiKey,
+      subject: finalEmailConfig.subject.substring(0, 50) + "...",
+    })
+
     // Replace placeholders
-    let finalBody = emailConfig.body
-    let finalSubject = emailConfig.subject
+    let finalBody = finalEmailConfig.body
+    let finalSubject = finalEmailConfig.subject
 
     const allData = {
       ...recipientData,
@@ -75,12 +111,6 @@ async function sendCertificateEmail(
     }
 
     console.log(`📧 [v0] [Email] Enviando email com anexo de ${Math.round(pdfBytes.byteLength / 1024)}KB`)
-
-    // Forçar provider para resend
-    const finalEmailConfig = {
-      ...emailConfig,
-      provider: "resend" as const,
-    }
 
     const result = await EmailService.sendEmailWithRetry(
       {
@@ -267,6 +297,11 @@ export async function POST(request: NextRequest) {
       }
       issuedCertificateData = newCertificate
     }
+
+    console.log(`🔄 [v0] [Certificate] Certificado gerado com sucesso. Iniciando processo de envio de email...`)
+    console.log(`🔍 [v0] [Certificate Debug] Template ID: ${template.id}`)
+    console.log(`🔍 [v0] [Certificate Debug] Recipient data keys:`, Object.keys(recipient_data))
+    console.log(`🔍 [v0] [Certificate Debug] Certificate number: ${certificateNumber}`)
 
     // Trigger email sending after successful DB operation, without blocking the response
     sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url, pdfBytes)
