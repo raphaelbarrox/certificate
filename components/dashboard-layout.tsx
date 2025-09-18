@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button"
 import { LayoutDashboard, FileText, Award, LogOut, User } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { supabase } from "@/lib/supabase"
-import { LoadingSpinner } from "@/components/loading-spinner"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -33,7 +32,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" text="Carregando dashboard..." />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
     )
   }
@@ -50,32 +49,29 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <h1 className="text-xl font-bold text-gray-900">Certificados</h1>
         </div>
 
-        <nav className="mt-6" role="navigation" aria-label="Menu principal">
+        <nav className="mt-6">
           <div className="px-3">
             <Link
               href="/dashboard"
-              className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Ir para dashboard"
+              className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900"
             >
-              <LayoutDashboard className="mr-3 h-5 w-5" aria-hidden="true" />
+              <LayoutDashboard className="mr-3 h-5 w-5" />
               Dashboard
             </Link>
 
             <Link
               href="/dashboard/templates"
-              className="flex items-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Gerenciar templates"
+              className="flex items-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900"
             >
-              <FileText className="mr-3 h-5 w-5" aria-hidden="true" />
+              <FileText className="mr-3 h-5 w-5" />
               Templates
             </Link>
 
             <Link
               href="/dashboard/certificates"
-              className="flex items-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Ver certificados emitidos"
+              className="flex items-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100 hover:text-gray-900"
             >
-              <Award className="mr-3 h-5 w-5" aria-hidden="true" />
+              <Award className="mr-3 h-5 w-5" />
               Certificados
             </Link>
           </div>
@@ -85,15 +81,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="absolute bottom-0 w-64 p-4 border-t border-gray-200">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <User className="h-8 w-8 text-gray-400" aria-hidden="true" />
+              <User className="h-8 w-8 text-gray-400" />
             </div>
             <div className="ml-3 flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate" title={user.email}>
-                {user.email}
-              </p>
+              <p className="text-sm font-medium text-gray-900 truncate">{user.email}</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="ml-2" aria-label="Fazer logout">
-              <LogOut className="h-4 w-4" aria-hidden="true" />
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="ml-2">
+              <LogOut className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -101,9 +95,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Main content */}
       <div className="flex-1 overflow-auto">
-        <main className="p-8" role="main">
-          {children}
-        </main>
+        <main className="p-8">{children}</main>
       </div>
     </div>
   )

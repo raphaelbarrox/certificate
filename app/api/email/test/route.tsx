@@ -1,40 +1,24 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { EmailService } from "@/lib/email-service"
-import { getRealIP, checkRateLimit, createRateLimitResponse, addRateLimitHeaders, RATE_LIMITS } from "@/lib/rate-limit"
 
 export const runtime = "nodejs"
 
 export async function POST(request: NextRequest) {
-  const clientIP = getRealIP(request)
-  const rateLimitKey = `${clientIP}:/api/email/test`
-  const rateLimitConfig = RATE_LIMITS["/api/email/test"]
-
-  const { allowed, remaining, resetTime } = checkRateLimit(rateLimitKey, rateLimitConfig)
-
-  if (!allowed) {
-    console.log(`[Rate Limit] Blocked request from ${clientIP} - limit exceeded`)
-    return createRateLimitResponse(resetTime)
-  }
-
-  console.log(`[Rate Limit] Request allowed from ${clientIP} - ${remaining} remaining`)
-
   try {
     const { senderEmail, senderName } = await request.json()
 
     if (!senderEmail) {
-      const errorResponse = NextResponse.json({ error: "Email do remetente é obrigatório." }, { status: 400 })
-      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+      return NextResponse.json({ error: "Email do remetente é obrigatório." }, { status: 400 })
     }
 
     // Validar domínio
     if (!EmailService.validateEmailDomain(senderEmail)) {
-      const errorResponse = NextResponse.json(
+      return NextResponse.json(
         {
           error: "Email deve ser do domínio therapist.international",
         },
         { status: 400 },
       )
-      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
     }
 
     // Enviar email de teste
@@ -57,24 +41,20 @@ export async function POST(request: NextRequest) {
     })
 
     if (!result.success) {
-      const errorResponse = NextResponse.json({ error: result.error }, { status: 500 })
-      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+      return NextResponse.json({ error: result.error }, { status: 500 })
     }
 
-    const response = NextResponse.json({
+    return NextResponse.json({
       message: `Email de teste enviado com sucesso para ${senderEmail}!`,
       messageId: result.messageId,
     })
-
-    return addRateLimitHeaders(response, remaining - 1, resetTime)
   } catch (error: any) {
     console.error("[Email Test Error]", error)
-    const errorResponse = NextResponse.json(
+    return NextResponse.json(
       {
         error: `Erro no teste: ${error.message}`,
       },
       { status: 500 },
     )
-    return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
   }
 }

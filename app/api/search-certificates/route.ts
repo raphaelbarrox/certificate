@@ -1,52 +1,14 @@
-import type { NextRequest } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { getRealIP, checkRateLimit, createRateLimitResponse, addRateLimitHeaders, RATE_LIMITS } from "@/lib/rate-limit"
-import { SearchSchema, sanitizeString } from "@/lib/input-validator"
-import { createSecureResponse } from "@/lib/security-headers"
-import { securityLogger } from "@/lib/security-logger"
 
 export async function GET(request: NextRequest) {
-  const clientIP = getRealIP(request)
-  const userAgent = request.headers.get("user-agent") || "unknown"
-  const rateLimitKey = `${clientIP}:/api/search-certificates`
-  const rateLimitConfig = RATE_LIMITS["/api/search-certificates"]
-
-  const { allowed, remaining, resetTime } = checkRateLimit(rateLimitKey, rateLimitConfig)
-
-  if (!allowed) {
-    securityLogger.log({
-      type: "rate_limit",
-      ip: clientIP,
-      userAgent,
-      endpoint: "/api/search-certificates",
-      details: "Rate limit exceeded",
-    })
-    console.log(`[Rate Limit] Blocked request from ${clientIP} - limit exceeded`)
-    return createRateLimitResponse(resetTime)
-  }
-
-  console.log(`[Rate Limit] Request allowed from ${clientIP} - ${remaining} remaining`)
-
   try {
     const { searchParams } = new URL(request.url)
-    const rawQuery = searchParams.get("q")?.trim()
+    const query = searchParams.get("q")?.trim()
 
-    const validationResult = SearchSchema.safeParse({ q: rawQuery })
-
-    if (!validationResult.success) {
-      securityLogger.log({
-        type: "validation_error",
-        ip: clientIP,
-        userAgent,
-        endpoint: "/api/search-certificates",
-        details: `Invalid search query: ${rawQuery}`,
-      })
-
-      const errorResponse = createSecureResponse({ error: "Query de busca inválida" }, 400)
-      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+    if (!query) {
+      return NextResponse.json({ error: "Query parameter is required" }, { status: 400 })
     }
-
-    const query = sanitizeString(validationResult.data.q)
 
     const supabase = createClient()
 
@@ -78,23 +40,12 @@ export async function GET(request: NextRequest) {
       throw new Error("Database search failed")
     }
 
-    const response = createSecureResponse({
+    return NextResponse.json({
       certificates: data || [],
       total: data?.length || 0,
     })
-
-    return addRateLimitHeaders(response, remaining - 1, resetTime)
   } catch (error) {
-    securityLogger.log({
-      type: "suspicious_activity",
-      ip: clientIP,
-      userAgent,
-      endpoint: "/api/search-certificates",
-      details: `Search error: ${error instanceof Error ? error.message : "Unknown error"}`,
-    })
-
     console.error("Search API error:", error)
-    const errorResponse = createSecureResponse({ error: "Erro interno do servidor. Tente novamente." }, 500)
-    return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+    return NextResponse.json({ error: "Erro interno do servidor. Tente novamente." }, { status: 500 })
   }
 }
