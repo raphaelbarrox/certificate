@@ -1,9 +1,35 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { CertificateIdSchema, sanitizeString } from "@/lib/input-validator"
+import { createSecureResponse } from "@/lib/security-headers"
+import { securityLogger } from "@/lib/security-logger"
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+function getRealIP(request: NextRequest) {
+  return request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || request.ip
+}
+
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const clientIP = getRealIP(request) || "unknown"
+  const userAgent = request.headers.get("user-agent") || "unknown"
+
   try {
-    const { id } = await params
+    const { id: rawId } = params
+
+    const validationResult = CertificateIdSchema.safeParse({ id: rawId })
+
+    if (!validationResult.success) {
+      securityLogger.log({
+        type: "validation_error",
+        ip: clientIP,
+        userAgent,
+        endpoint: "/api/certificates/download",
+        details: `Invalid certificate ID: ${rawId}`,
+      })
+
+      return createSecureResponse({ error: "ID de certificado inválido" }, 400)
+    }
+
+    const id = sanitizeString(validationResult.data.id)
     const supabase = createClient()
 
     const { data: certificate, error } = await supabase
@@ -13,13 +39,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .single()
 
     if (error || !certificate) {
+      securityLogger.log({
+        type: "unauthorized_access",
+        ip: clientIP,
+        userAgent,
+        endpoint: "/api/certificates/download",
+        details: `Attempted to access non-existent certificate: ${id}`,
+      })
+
       console.error("Certificate not found:", error)
-      return NextResponse.json({ error: "Certificado não encontrado" }, { status: 404 })
+      return createSecureResponse({ error: "Certificado não encontrado" }, 404)
     }
 
     if (!certificate.pdf_url) {
       console.error("PDF URL not found for certificate:", id)
-      return NextResponse.json({ error: "PDF não disponível" }, { status: 404 })
+      return createSecureResponse({ error: "PDF não disponível" }, 404)
     }
 
     try {
@@ -36,14 +70,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           "Content-Type": "application/pdf",
           "Content-Disposition": `attachment; filename="${fileName}"`,
           "Cache-Control": "public, max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
         },
       })
     } catch (fetchError) {
       console.error("Error fetching PDF:", fetchError)
-      return NextResponse.json({ error: "Erro ao baixar PDF" }, { status: 500 })
+      return createSecureResponse({ error: "Erro ao baixar PDF" }, 500)
     }
   } catch (error) {
+    securityLogger.log({
+      type: "suspicious_activity",
+      ip: clientIP,
+      userAgent,
+      endpoint: "/api/certificates/download",
+      details: `Download error: ${error instanceof Error ? error.message : "Unknown error"}`,
+    })
+
     console.error("Error in download route:", error)
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
+    return createSecureResponse({ error: "Erro interno do servidor" }, 500)
   }
 }

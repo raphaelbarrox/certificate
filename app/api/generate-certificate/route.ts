@@ -1,8 +1,22 @@
-import { NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
 import { generateCertificate } from "@/lib/certificate-generator"
+import { getRealIP, checkRateLimit, createRateLimitResponse, addRateLimitHeaders, RATE_LIMITS } from "@/lib/rate-limit"
 
 export async function POST(request: NextRequest) {
+  const clientIP = getRealIP(request)
+  const rateLimitKey = `${clientIP}:/api/generate-certificate`
+  const rateLimitConfig = RATE_LIMITS["/api/generate-certificate"]
+
+  const { allowed, remaining, resetTime } = checkRateLimit(rateLimitKey, rateLimitConfig)
+
+  if (!allowed) {
+    console.log(`[Rate Limit] Blocked request from ${clientIP} - limit exceeded`)
+    return createRateLimitResponse(resetTime)
+  }
+
+  console.log(`[Rate Limit] Request allowed from ${clientIP} - ${remaining} remaining`)
+
   try {
     const formData = await request.formData()
     const templateId = formData.get("templateId") as string
@@ -10,7 +24,8 @@ export async function POST(request: NextRequest) {
     const imageFile = formData.get("image") as File | null
 
     if (!templateId || !recipientDataStr) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      const errorResponse = NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
     }
 
     const recipientData = JSON.parse(recipientDataStr)
@@ -23,7 +38,8 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (templateError || !template) {
-      return NextResponse.json({ error: "Template not found" }, { status: 404 })
+      const errorResponse = NextResponse.json({ error: "Template not found" }, { status: 404 })
+      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
     }
 
     let photoUrl: string | undefined
@@ -34,13 +50,12 @@ export async function POST(request: NextRequest) {
       const fileName = `${Date.now()}-photo.${fileExt}`
       const filePath = `certificates/${fileName}`
 
-      const { error: uploadError } = await supabase.storage
-        .from("certificate-images")
-        .upload(filePath, imageFile)
+      const { error: uploadError } = await supabase.storage.from("certificate-images").upload(filePath, imageFile)
 
       if (uploadError) {
         console.error("Upload error:", uploadError)
-        return NextResponse.json({ error: "Failed to upload image" }, { status: 500 })
+        const errorResponse = NextResponse.json({ error: "Failed to upload image" }, { status: 500 })
+        return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
       }
 
       const { data } = supabase.storage.from("certificate-images").getPublicUrl(filePath)
@@ -65,21 +80,25 @@ export async function POST(request: NextRequest) {
 
     if (dbError) {
       console.error("Database error:", dbError)
-      return NextResponse.json({ error: "Failed to save certificate" }, { status: 500 })
+      const errorResponse = NextResponse.json({ error: "Failed to save certificate" }, { status: 500 })
+      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
     }
 
     // Generate PDF
     const pdfBytes = await generateCertificate(template, recipientData, photoUrl)
 
     // Return download URL
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       certificateId: certificate.id,
       certificateNumber,
       downloadUrl: `/api/certificates/${certificate.id}/download`,
     })
+
+    return addRateLimitHeaders(response, remaining - 1, resetTime)
   } catch (error) {
     console.error("Error generating certificate:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    const errorResponse = NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
   }
 }

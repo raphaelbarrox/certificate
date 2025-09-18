@@ -5,6 +5,10 @@ import { EmailService } from "@/lib/email-service"
 import { ImageCache } from "@/lib/image-cache"
 import { PDFCache } from "@/lib/pdf-cache"
 import { QRCodeCache } from "@/lib/qrcode-cache"
+import { getRealIP, checkRateLimit, createRateLimitResponse, addRateLimitHeaders, RATE_LIMITS } from "@/lib/rate-limit"
+import { CertificateDataSchema, sanitizeObject, validateCertificateOwnership } from "@/lib/input-validator"
+import { createSecureResponse } from "@/lib/security-headers"
+import { securityLogger } from "@/lib/security-logger"
 
 async function imageUrlToDataUrl(url: string): Promise<string> {
   return ImageCache.getImageDataUrl(url)
@@ -174,7 +178,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     })
 
     console.log(`[v0] [Email] 📧 === PREPARANDO ENVIO FINAL ===`)
-    console.log(`[v0] [Email] 📧 De: ${senderName || "Sistema"} <${senderEmail}>`)
+    console.log(`[v0] [Email] 📧 De: ${senderName || "Sistema de Certificados"} <${senderEmail}>`)
     console.log(`[v0] [Email] 📧 Para: ${recipientEmail}`)
     console.log(`[v0] [Email] 📧 Assunto processado: ${finalSubject}`)
     console.log(`[v0] [Email] 📧 Corpo (primeiros 200 chars): ${finalBody.substring(0, 200)}...`)
@@ -215,14 +219,52 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 }
 
 export async function POST(request: NextRequest) {
+  const clientIP = getRealIP(request)
+  const userAgent = request.headers.get("user-agent") || "unknown"
+  const rateLimitKey = `${clientIP}:/api/issue-certificate`
+  const rateLimitConfig = RATE_LIMITS["/api/issue-certificate"]
+
+  const { allowed, remaining, resetTime } = checkRateLimit(rateLimitKey, rateLimitConfig)
+
+  if (!allowed) {
+    securityLogger.log({
+      type: "rate_limit",
+      ip: clientIP,
+      userAgent,
+      endpoint: "/api/issue-certificate",
+      details: "Rate limit exceeded",
+    })
+    console.log(`[Rate Limit] Blocked request from ${clientIP} - limit exceeded`)
+    return createRateLimitResponse(resetTime)
+  }
+
+  console.log(`[Rate Limit] Request allowed from ${clientIP} - ${remaining} remaining`)
+
   const supabase = createClient()
   let issuedCertificateData: any = null
   let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
     const requestData = await request.json()
+
+    const validationResult = CertificateDataSchema.safeParse(requestData)
+
+    if (!validationResult.success) {
+      securityLogger.log({
+        type: "validation_error",
+        ip: clientIP,
+        userAgent,
+        endpoint: "/api/issue-certificate",
+        details: `Validation failed: ${validationResult.error.message}`,
+      })
+
+      const errorResponse = createSecureResponse({ error: "Dados inválidos fornecidos" }, 400)
+      return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+    }
+
+    const sanitizedData = sanitizeObject(validationResult.data)
     const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
-      requestData
+      sanitizedData
 
     // DEBUG: Log para rastrear os dados recebidos
     console.log(`[API] ====== INÍCIO DO PROCESSAMENTO ======`)
@@ -266,6 +308,52 @@ export async function POST(request: NextRequest) {
           console.log("[Storage] Old PDF path to delete:", oldPdfPath)
         }
       }
+
+      const { data: existingCertificate, error: checkError } = await supabase
+        .from("issued_certificates")
+        .select("id, template_id, recipient_cpf, recipient_dob, pdf_url")
+        .eq("certificate_number", certificate_number_to_update)
+        .eq("recipient_cpf", recipient_cpf)
+        .eq("recipient_dob", recipient_dob)
+        .single()
+
+      if (checkError || !existingCertificate) {
+        securityLogger.log({
+          type: "unauthorized_access",
+          ip: clientIP,
+          userAgent,
+          endpoint: "/api/issue-certificate",
+          details: `Attempted to update non-existent certificate: ${certificate_number_to_update}`,
+        })
+
+        console.error("Certificado não encontrado para atualização:", checkError)
+        const errorResponse = createSecureResponse(
+          { error: "Certificado não encontrado ou dados de validação incorretos" },
+          404,
+        )
+        return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+      }
+
+      if (!validateCertificateOwnership(existingCertificate, { recipient_cpf, recipient_dob })) {
+        securityLogger.log({
+          type: "unauthorized_access",
+          ip: clientIP,
+          userAgent,
+          endpoint: "/api/issue-certificate",
+          details: `Ownership validation failed for certificate: ${certificate_number_to_update}`,
+        })
+
+        const errorResponse = createSecureResponse({ error: "Acesso negado" }, 403)
+        return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
+      }
+
+      if (existingCertificate.template_id !== template_id) {
+        return NextResponse.json({ error: "Template não corresponde ao certificado original" }, { status: 400 })
+      }
+
+      console.log(
+        `[AUDIT] Updating certificate ${certificate_number_to_update} - Old PDF: ${existingCertificate.pdf_url}`,
+      )
     }
 
     const cachedPDF = certificate_number_to_update ? null : PDFCache.get(template_id, recipient_data)
@@ -281,32 +369,6 @@ export async function POST(request: NextRequest) {
 
     if (templateError || !template) {
       return NextResponse.json({ error: "Template de certificado não encontrado" }, { status: 404 })
-    }
-
-    if (certificate_number_to_update) {
-      const { data: existingCertificate, error: checkError } = await supabase
-        .from("issued_certificates")
-        .select("id, template_id, recipient_cpf, recipient_dob, pdf_url")
-        .eq("certificate_number", certificate_number_to_update)
-        .eq("recipient_cpf", recipient_cpf)
-        .eq("recipient_dob", recipient_dob)
-        .single()
-
-      if (checkError || !existingCertificate) {
-        console.error("Certificado não encontrado para atualização:", checkError)
-        return NextResponse.json(
-          { error: "Certificado não encontrado ou dados de validação incorretos" },
-          { status: 404 },
-        )
-      }
-
-      if (existingCertificate.template_id !== template_id) {
-        return NextResponse.json({ error: "Template não corresponde ao certificado original" }, { status: 400 })
-      }
-
-      console.log(
-        `[AUDIT] Updating certificate ${certificate_number_to_update} - Old PDF: ${existingCertificate.pdf_url}`,
-      )
     }
 
     const templateData = template.template_data || {}
@@ -478,14 +540,26 @@ export async function POST(request: NextRequest) {
       console.error(`[v0] [Email] ❌ Falha no envio automático: ${emailResult.reason}`)
     }
 
-    return NextResponse.json({
+    const response = createSecureResponse({
       ...issuedCertificateData,
       emailSent: emailResult.success,
       emailError: emailResult.success ? null : emailResult.reason,
     })
+
+    return addRateLimitHeaders(response, remaining - 1, resetTime)
   } catch (error) {
+    securityLogger.log({
+      type: "suspicious_activity",
+      ip: clientIP,
+      userAgent,
+      endpoint: "/api/issue-certificate",
+      details: `Unexpected error: ${error instanceof Error ? error.message : "Unknown error"}`,
+    })
+
     console.error("Erro ao emitir certificado:", error)
     const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido"
-    return NextResponse.json({ error: errorMessage }, { status: 500 })
+
+    const errorResponse = createSecureResponse({ error: "Erro interno do servidor" }, 500)
+    return addRateLimitHeaders(errorResponse, remaining - 1, resetTime)
   }
 }
