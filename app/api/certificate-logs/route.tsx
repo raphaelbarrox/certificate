@@ -3,10 +3,7 @@ import { NextResponse } from "next/server"
 let certificateLogs: string[] = []
 
 export async function GET() {
-  const logs = [...certificateLogs]
-  certificateLogs = [] // Limpar logs após retornar
-
-  return NextResponse.json({ logs })
+  return NextResponse.json({ logs: [...certificateLogs] })
 }
 
 export async function POST(request: Request) {
@@ -26,4 +23,9 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: "Erro ao adicionar log" }, { status: 500 })
   }
+}
+
+export async function DELETE() {
+  certificateLogs = []
+  return NextResponse.json({ success: true })
 }

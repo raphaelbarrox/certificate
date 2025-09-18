@@ -597,6 +597,7 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
 
   const clearCertificateLogs = () => {
     setCertificateLogs([])
+    fetch("/api/certificate-logs", { method: "DELETE" }).catch(console.error)
   }
 
   return (
