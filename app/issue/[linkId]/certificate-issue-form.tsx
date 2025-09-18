@@ -226,17 +226,46 @@ export function CertificateIssueForm({
         }
       }
 
+      // CORREÇÃO PRINCIPAL: Garantir que o email seja salvo com múltiplas chaves
       const recipientDataForDb: Record<string, any> = {}
+
       for (const field of fields) {
         const value = finalFormData[field.id]
         if (value) {
-          if (field.placeholderId) {
-            recipientDataForDb[field.placeholderId] = value
-          } else {
+          // CORREÇÃO: Salvar o valor com AMBAS as chaves se for email
+          if (field.id === 'default_email' || field.type === 'email') {
+            // Salvar com a chave original
             recipientDataForDb[field.id] = value
+            
+            // Se tiver placeholderId, salvar também com ele
+            if (field.placeholderId) {
+              recipientDataForDb[field.placeholderId] = value
+            }
+            
+            // Garantir que também existe como 'email' genérico
+            recipientDataForDb['email'] = value
+            recipientDataForDb['recipient_email'] = value
+            
+            console.log(`[Form] Email salvo com múltiplas chaves:`, {
+              [field.id]: value,
+              [field.placeholderId || 'no-placeholder']: value,
+              email: value,
+              recipient_email: value
+            })
+          } else {
+            // Para outros campos, manter o comportamento original
+            if (field.placeholderId) {
+              recipientDataForDb[field.placeholderId] = value
+            } else {
+              recipientDataForDb[field.id] = value
+            }
           }
         }
       }
+
+      // Adicionar log para debug
+      console.log(`[Form] Dados finais para o banco:`, recipientDataForDb)
+      console.log(`[Form] Chaves disponíveis:`, Object.keys(recipientDataForDb))
 
       const response = await fetch("/api/issue-certificate", {
         method: "POST",

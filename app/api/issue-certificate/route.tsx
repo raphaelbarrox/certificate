@@ -12,8 +12,22 @@ async function imageUrlToDataUrl(url: string): Promise<string> {
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
   console.log(`[v0] [Email] 🚀 Iniciando processo de envio para certificado ${certificateNumber}`)
+  
+  // DEBUG: Ver toda a estrutura do template
+  console.log(`[v0] [Email] Template completo:`, {
+    hasFormDesign: !!template.form_design,
+    formDesignKeys: Object.keys(template.form_design || {}),
+    hasDesign: !!template.form_design?.design,
+    hasEmailConfig: !!template.form_design?.emailConfig,
+    hasDesignEmailConfig: !!template.form_design?.design?.emailConfig
+  })
 
-  const emailConfig = template.form_design?.emailConfig
+  // CORREÇÃO PRINCIPAL: Buscar emailConfig no lugar CORRETO
+  // Tenta primeiro em form_design.design.emailConfig (estrutura nova)
+  // Se não encontrar, tenta em form_design.emailConfig (estrutura antiga/legado)
+  let emailConfig = template.form_design?.design?.emailConfig || template.form_design?.emailConfig
+  
+  console.log(`[v0] [Email] EmailConfig encontrado:`, !!emailConfig)
   console.log(`[v0] [Email] EmailConfig completo:`, JSON.stringify(emailConfig, null, 2))
 
   if (!emailConfig) {
@@ -22,14 +36,18 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     return { success: false, reason: "Configuração de email não encontrada no template" }
   }
 
-  const isEnabled = emailConfig.enabled === true || emailConfig.enabled === "true" || emailConfig.enabled === 1
-  console.log(`[v0] [Email] Toggle enabled (original):`, emailConfig.enabled)
+  // Verificação robusta do enabled - aceita múltiplos formatos
+  const isEnabled = emailConfig.enabled === true || 
+                   emailConfig.enabled === "true" || 
+                   emailConfig.enabled === 1 || 
+                   emailConfig.enabled === "1"
+  
+  console.log(`[v0] [Email] Toggle enabled (raw):`, emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (tipo):`, typeof emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (convertido):`, isEnabled)
 
   if (!isEnabled) {
     console.log(`[v0] [Email] ❌ Envio desativado para o template ${template.id}`)
-    console.log(`[v0] [Email] Valor original do toggle:`, emailConfig.enabled)
     return { success: false, reason: "Envio de email está desativado no template" }
   }
 
@@ -37,6 +55,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
 
   const { senderName, senderEmail, subject, body } = emailConfig
 
+  // Validação dos campos obrigatórios
   const missingFields = []
   if (!senderEmail || typeof senderEmail !== "string" || !senderEmail.trim()) missingFields.push("senderEmail")
   if (!subject || typeof subject !== "string" || !subject.trim()) missingFields.push("subject")
@@ -48,38 +67,53 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       senderName: senderName || "VAZIO",
       senderEmail: senderEmail || "VAZIO",
       subject: subject || "VAZIO",
-      body: body ? "DEFINIDO" : "VAZIO",
-      senderEmailType: typeof senderEmail,
-      subjectType: typeof subject,
-      bodyType: typeof body,
+      body: body ? `DEFINIDO (${body.length} chars)` : "VAZIO",
     })
     return { success: false, reason: `Campos obrigatórios não preenchidos: ${missingFields.join(", ")}` }
   }
 
-  const recipientEmail = recipientData.default_email || recipientData.email || recipientData.recipient_email
+  // Busca aprimorada do email do destinatário
+  let recipientEmail = recipientData.default_email || 
+                       recipientData.email || 
+                       recipientData.recipient_email
+  
+  // Se não encontrou nas chaves padrão, busca em QUALQUER campo que tenha @
+  if (!recipientEmail) {
+    console.log(`[v0] [Email] Email não encontrado nas chaves padrão, buscando em todos os campos...`)
+    for (const [key, value] of Object.entries(recipientData)) {
+      if (typeof value === 'string' && value.includes('@')) {
+        recipientEmail = value
+        console.log(`[v0] [Email] Email encontrado na chave '${key}': ${recipientEmail}`)
+        break
+      }
+    }
+  }
+  
   console.log(`[v0] [Email] Buscando email do destinatário:`, {
     default_email: recipientData.default_email,
     email: recipientData.email,
     recipient_email: recipientData.recipient_email,
     emailEncontrado: recipientEmail,
+    todasAsChaves: Object.keys(recipientData)
   })
 
   if (!recipientEmail || typeof recipientEmail !== "string" || !recipientEmail.trim()) {
     console.error(`[v0] [Email] ❌ Email do destinatário não encontrado`)
-    console.error(`[v0] [Email] Dados completos do destinatário:`, JSON.stringify(recipientData, null, 2))
+    console.error(`[v0] [Email] Chaves disponíveis:`, Object.keys(recipientData))
+    console.error(`[v0] [Email] Dados completos:`, JSON.stringify(recipientData, null, 2))
     return { success: false, reason: "Email do destinatário não encontrado nos dados fornecidos" }
   }
 
-  console.log(`[v0] [Email] ✅ Email do destinatário confirmado: ${recipientEmail}`)
+  // Validação do formato do email
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(recipientEmail)) {
+    console.error(`[v0] [Email] ❌ Email inválido: ${recipientEmail}`)
+    return { success: false, reason: `Email inválido: ${recipientEmail}` }
+  }
 
-  console.log(`[v0] [Email] Configuração extraída:`, {
-    senderName: senderName || "Não definido",
-    senderEmail: senderEmail || "Não definido",
-    subject: subject || "Não definido",
-    body: body ? `Definido (${body.length} caracteres)` : "Não definido",
-    recipientEmail: recipientEmail,
-  })
+  console.log(`[v0] [Email] ✅ Email do destinatário confirmado e válido: ${recipientEmail}`)
 
+  // Validação do domínio do remetente
   if (!EmailService.validateEmailDomain(senderEmail)) {
     console.error(`[v0] [Email] ❌ Domínio inválido: ${senderEmail}`)
     return {
@@ -89,51 +123,92 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   }
 
   console.log(`[v0] [Email] ✅ Domínio válido: ${senderEmail}`)
+  console.log(`[v0] [Email] 📧 Configuração final:`, {
+    from: `${senderName || "Sistema"} <${senderEmail}>`,
+    to: recipientEmail,
+    subject: subject,
+    bodyLength: body.length
+  })
 
   try {
-    const emailData = {
-      nome: recipientData.nome || recipientData.name || recipientData.nome_completo || "Destinatário",
+    // Preparação dos dados para substituição
+    const emailData: Record<string, any> = {
+      // Dados do certificado
       certificate_link: pdfUrl,
       certificate_id: certificateNumber,
+      
+      // Dados do destinatário - incluir TODOS os campos
       ...recipientData,
+      
+      // Garantir que campos comuns existam
+      nome: recipientData.nome || 
+            recipientData.name || 
+            recipientData.nome_completo || 
+            recipientData.Nome || 
+            recipientData.NAME || 
+            "Destinatário",
+      email: recipientEmail,
+      default_email: recipientEmail
     }
 
-    console.log(`[v0] [Email] Dados para substituição:`, emailData)
+    console.log(`[v0] [Email] Dados disponíveis para substituição:`, Object.keys(emailData))
 
+    // Substituição das variáveis no corpo e assunto
     let finalBody = String(body)
     let finalSubject = String(subject)
 
+    // Realizar substituições - aceita {{var}} e {{ var }} (com espaços)
     Object.keys(emailData).forEach((key) => {
-      const regex = new RegExp(`{{${key}}}`, "g")
       const value = emailData[key] || ""
-      finalBody = finalBody.replace(regex, String(value))
-      finalSubject = finalSubject.replace(regex, String(value))
+      
+      // Substituir {{key}} (exato)
+      const regex1 = new RegExp(`{{${key}}}`, "gi")
+      finalBody = finalBody.replace(regex1, String(value))
+      finalSubject = finalSubject.replace(regex1, String(value))
+      
+      // Substituir {{ key }} (com espaços)
+      const regex2 = new RegExp(`{{\\s*${key}\\s*}}`, "gi")
+      finalBody = finalBody.replace(regex2, String(value))
+      finalSubject = finalSubject.replace(regex2, String(value))
     })
 
-    console.log(`[v0] [Email] 📧 Preparando envio:`)
+    console.log(`[v0] [Email] 📧 === PREPARANDO ENVIO FINAL ===`)
+    console.log(`[v0] [Email] 📧 De: ${senderName || "Sistema"} <${senderEmail}>`)
     console.log(`[v0] [Email] 📧 Para: ${recipientEmail}`)
-    console.log(`[v0] [Email] 📧 Assunto: ${finalSubject}`)
-    console.log(`[v0] [Email] 📧 De: ${EmailService.formatSenderEmail(senderName || "Sistema", senderEmail)}`)
-    console.log(`[v0] [Email] 📧 Corpo: ${finalBody.substring(0, 200)}...`)
+    console.log(`[v0] [Email] 📧 Assunto processado: ${finalSubject}`)
+    console.log(`[v0] [Email] 📧 Corpo (primeiros 200 chars): ${finalBody.substring(0, 200)}...`)
+    console.log(`[v0] [Email] 📧 ========================`)
 
+    // CHAMADA DO ENVIO - Exatamente como no teste que funciona
     const result = await EmailService.sendEmail({
-      from: EmailService.formatSenderEmail(senderName || "Sistema", senderEmail),
+      from: EmailService.formatSenderEmail(senderName || "Sistema de Certificados", senderEmail),
       to: recipientEmail,
       subject: finalSubject,
       html: finalBody,
     })
 
-    console.log(`[v0] [Email] Resultado do envio:`, result)
+    console.log(`[v0] [Email] Resultado do envio:`, JSON.stringify(result, null, 2))
 
     if (result.success) {
-      console.log(`[v0] [Email] ✅ Email enviado com sucesso! ID: ${result.messageId}`)
+      console.log(`[v0] [Email] ✅ === EMAIL ENVIADO COM SUCESSO ===`)
+      console.log(`[v0] [Email] ✅ Message ID: ${result.messageId}`)
+      console.log(`[v0] [Email] ✅ Destinatário: ${recipientEmail}`)
+      console.log(`[v0] [Email] ✅ Certificado: ${certificateNumber}`)
+      console.log(`[v0] [Email] ✅ ================================`)
       return { success: true, messageId: result.messageId }
     } else {
-      console.error(`[v0] [Email] ❌ Falha no envio: ${result.error}`)
+      console.error(`[v0] [Email] ❌ === FALHA NO ENVIO ===`)
+      console.error(`[v0] [Email] ❌ Erro: ${result.error}`)
+      console.error(`[v0] [Email] ❌ Destinatário: ${recipientEmail}`)
+      console.error(`[v0] [Email] ❌ ====================`)
       return { success: false, reason: result.error }
     }
   } catch (error) {
-    console.error(`[v0] [Email] ❌ Erro inesperado:`, error)
+    console.error(`[v0] [Email] ❌ === ERRO INESPERADO ===`)
+    console.error(`[v0] [Email] ❌ Erro:`, error)
+    console.error(`[v0] [Email] ❌ Stack:`, error instanceof Error ? error.stack : 'N/A')
+    console.error(`[v0] [Email] ❌ Tipo do erro:`, typeof error)
+    console.error(`[v0] [Email] ❌ ======================`)
     return { success: false, reason: error instanceof Error ? error.message : "Erro desconhecido" }
   }
 }
@@ -144,8 +219,25 @@ export async function POST(request: NextRequest) {
   let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
-    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
-      await request.json()
+    const requestData = await request.json()
+    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } = requestData
+
+    // DEBUG: Log para rastrear os dados recebidos
+    console.log(`[API] ====== INÍCIO DO PROCESSAMENTO ======`)
+    console.log(`[API] Template ID: ${template_id}`)
+    console.log(`[API] Certificate Update: ${certificate_number_to_update || 'NOVO'}`)
+    console.log(`[API] Recipient Data Keys:`, Object.keys(recipient_data || {}))
+    console.log(`[API] Recipient Data Completo:`, JSON.stringify(recipient_data, null, 2))
+    
+    // Verificar especificamente campos de email
+    const emailFields = Object.entries(recipient_data || {})
+      .filter(([key, value]) => 
+        key.toLowerCase().includes('email') || 
+        key.toLowerCase().includes('mail') ||
+        (typeof value === 'string' && value.includes('@'))
+      )
+    console.log(`[API] Campos relacionados a email encontrados:`, emailFields)
+    console.log(`[API] =====================================`)
 
     if (!template_id || !recipient_data || !recipient_cpf || !recipient_dob) {
       return NextResponse.json(
@@ -370,6 +462,7 @@ export async function POST(request: NextRequest) {
       id: template.id,
       hasFormDesign: !!template.form_design,
       hasEmailConfig: !!template.form_design?.emailConfig,
+      hasDesignEmailConfig: !!template.form_design?.design?.emailConfig,
     })
     console.log(`[v0] [Email] Dados do destinatário para envio:`, recipient_data)
 
