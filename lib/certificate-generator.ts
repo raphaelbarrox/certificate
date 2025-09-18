@@ -1,3 +1,6 @@
+// ============================================
+// 1. lib/certificate-generator.ts (SEU CÓDIGO ORIGINAL - INALTERADO)
+// ============================================
 import { jsPDF } from "jspdf"
 import type { File } from "formdata-node"
 import "jspdf-autotable"
@@ -138,4 +141,232 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// ============================================
+// 2. lib/email-service.ts (SEU TESTE QUE FUNCIONA)
+// ============================================
+import { Resend } from 'resend'
+
+export class EmailService {
+  private static resend = new Resend(process.env.RESEND_API_KEY)
+
+  static validateEmailDomain(email: string): boolean {
+    return email.endsWith('@therapist.international')
+  }
+
+  static formatSenderEmail(name: string, email: string): string {
+    return `${name} <${email}>`
+  }
+
+  static async sendEmail(params: {
+    from: string
+    to: string | string[]
+    subject: string
+    html: string
+  }) {
+    try {
+      const data = await this.resend.emails.send({
+        from: params.from,
+        to: params.to,
+        subject: params.subject,
+        html: params.html
+      })
+      
+      return { 
+        success: true, 
+        messageId: data.id 
+      }
+    } catch (error: any) {
+      console.error('[EmailService Error]', error)
+      return { 
+        success: false, 
+        error: error.message || 'Erro ao enviar email' 
+      }
+    }
+  }
+}
+
+// ============================================
+// 3. app/api/certificates/send-with-email/route.ts
+// VERSÃO HARDCODED COM AS TAGS ESPECIFICADAS
+// ============================================
+import { type NextRequest, NextResponse } from "next/server"
+import { generateCertificate, generatePublicLinkId } from "@/lib/certificate-generator"
+import { EmailService } from "@/lib/email-service"
+
+export const runtime = "nodejs"
+
+export async function POST(request: NextRequest) {
+  try {
+    const { 
+      template,
+      recipientData, // Deve conter: nome_do_aluno, default_email, default_whatsapp, etc
+      senderEmail,
+      senderName
+    } = await request.json()
+
+    // Validações
+    if (!template || !recipientData || !senderEmail) {
+      return NextResponse.json(
+        { error: "Template, dados do destinatário e email do remetente são obrigatórios" },
+        { status: 400 }
+      )
+    }
+
+    // Validar domínio
+    if (!EmailService.validateEmailDomain(senderEmail)) {
+      return NextResponse.json(
+        { error: "Email deve ser do domínio therapist.international" },
+        { status: 400 },
+      )
+    }
+
+    // O email do destinatário vem de {{default_email}}
+    const recipientEmail = recipientData.default_email || recipientData.email
+    if (!recipientEmail) {
+      return NextResponse.json(
+        { error: "Email do destinatário não encontrado (default_email)" },
+        { status: 400 }
+      )
+    }
+
+    try {
+      // Gerar o certificado PDF
+      const pdfUint8Array = await generateCertificate(
+        template,
+        recipientData,
+        recipientData.photoUrl
+      )
+      
+      // Converter para Buffer
+      const pdfBuffer = Buffer.from(pdfUint8Array)
+      console.log('[Certificate] PDF gerado:', pdfBuffer.length, 'bytes')
+      
+      // Gerar ID único
+      const certificateId = generatePublicLinkId()
+      
+      // Gerar link do certificado
+      const certificateLink = `${process.env.NEXT_PUBLIC_APP_URL || 'https://seusite.com'}/certificates/${certificateId}`
+      
+      // Template hardcoded do email com as tags especificadas
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f5f5f5;">
+          <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 28px;">🎓 Certificado Disponível!</h1>
+            </div>
+            
+            <!-- Body -->
+            <div style="padding: 40px 30px;">
+              <p style="color: #333333; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                Olá <strong>${recipientData.nome_do_aluno || recipientData.student_name || 'Participante'}</strong>,
+              </p>
+              
+              <p style="color: #666666; font-size: 15px; line-height: 1.6; margin-bottom: 25px;">
+                Parabéns! Seu certificado foi gerado com sucesso e está pronto para download.
+              </p>
+              
+              <!-- Info Box -->
+              <div style="background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; margin: 25px 0; border-radius: 5px;">
+                <h3 style="color: #333333; margin: 0 0 10px 0; font-size: 16px;">Informações do Certificado:</h3>
+                
+                <p style="color: #666666; margin: 8px 0; font-size: 14px;">
+                  <strong>ID do Certificado:</strong> ${certificateId}
+                </p>
+                
+                <p style="color: #666666; margin: 8px 0; font-size: 14px;">
+                  <strong>Data de Emissão:</strong> ${new Date().toLocaleDateString('pt-BR')}
+                </p>
+                
+                <p style="color: #666666; margin: 8px 0; font-size: 14px;">
+                  <strong>Link:</strong> <a href="${certificateLink}" style="color: #667eea;">${certificateLink}</a>
+                </p>
+                
+                ${recipientData.default_whatsapp ? `
+                  <p style="color: #666666; margin: 8px 0; font-size: 14px;">
+                    <strong>WhatsApp:</strong> ${recipientData.default_whatsapp}
+                  </p>
+                ` : ''}
+              </div>
+              
+              <!-- Download Button -->
+              <div style="text-align: center; margin: 35px 0;">
+                <a href="${certificateLink}" 
+                   style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                          color: #ffffff; text-decoration: none; padding: 15px 40px; border-radius: 30px; 
+                          font-size: 16px; font-weight: bold; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+                  📥 Baixar Certificado
+                </a>
+              </div>
+              
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #eeeeee;">
+              
+              <p style="color: #999999; font-size: 13px; line-height: 1.5;">
+                <strong>Importante:</strong> Este link é único e exclusivo para seu certificado. 
+                Guarde-o em local seguro para futuras consultas.
+              </p>
+            </div>
+            
+            <!-- Footer -->
+            <div style="background-color: #f8f9fa; padding: 20px 30px; text-align: center; border-top: 1px solid #eeeeee; border-radius: 0 0 10px 10px;">
+              <p style="color: #999999; font-size: 12px; margin: 0;">
+                Enviado por ${senderName || 'Sistema de Certificados'}<br>
+                ${senderEmail}
+              </p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+      
+      // Enviar email (sem anexo)
+      const emailResult = await EmailService.sendEmail({
+        from: EmailService.formatSenderEmail(senderName || "Sistema de Certificados", senderEmail),
+        to: recipientEmail, // Usando {{default_email}}
+        subject: `🎓 Certificado - ${recipientData.nome_do_aluno || recipientData.student_name || 'Participante'}`,
+        html: emailHtml
+      })
+
+      if (!emailResult.success) {
+        throw new Error(emailResult.error || 'Erro ao enviar email')
+      }
+
+      console.log('[Email] Enviado com sucesso para:', recipientEmail)
+
+      // Retornar resposta com todas as informações
+      return NextResponse.json({
+        success: true,
+        message: "Certificado gerado e email enviado com sucesso!",
+        data: {
+          certificateId: certificateId,
+          certificateLink: certificateLink,
+          recipientEmail: recipientEmail,
+          recipientName: recipientData.nome_do_aluno,
+          messageId: emailResult.messageId
+        }
+      })
+      
+    } catch (error: any) {
+      console.error('[Process Error]', error)
+      throw error
+    }
+
+  } catch (error: any) {
+    console.error("[API Error]", error)
+    return NextResponse.json(
+      {
+        error: `Erro ao processar: ${error.message}`,
+      },
+      { status: 500 },
+    )
+  }
 }
