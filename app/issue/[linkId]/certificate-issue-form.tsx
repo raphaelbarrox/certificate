@@ -233,24 +233,60 @@ export function CertificateIssueForm({
         const value = finalFormData[field.id]
         if (value) {
           // CORREÇÃO: Salvar o valor com AMBAS as chaves se for email
-          if (field.id === 'default_email' || field.type === 'email') {
+          if (field.id === "default_email" || field.type === "email") {
             // Salvar com a chave original
             recipientDataForDb[field.id] = value
-            
+
             // Se tiver placeholderId, salvar também com ele
             if (field.placeholderId) {
               recipientDataForDb[field.placeholderId] = value
             }
-            
+
             // Garantir que também existe como 'email' genérico
-            recipientDataForDb['email'] = value
-            recipientDataForDb['recipient_email'] = value
-            
+            recipientDataForDb["email"] = value
+            recipientDataForDb["recipient_email"] = value
+
             console.log(`[Form] Email salvo com múltiplas chaves:`, {
               [field.id]: value,
-              [field.placeholderId || 'no-placeholder']: value,
+              [field.placeholderId || "no-placeholder"]: value,
               email: value,
-              recipient_email: value
+              recipient_email: value,
+            })
+          } else if (
+            field.type === "text" &&
+            (field.label.toLowerCase().includes("nome") ||
+              field.label.toLowerCase().includes("name") ||
+              field.label.toLowerCase().includes("participante") ||
+              field.label.toLowerCase().includes("aluno") ||
+              field.label.toLowerCase().includes("estudante") ||
+              field.label.toLowerCase().includes("formando"))
+          ) {
+            // Salvar com a chave original
+            recipientDataForDb[field.id] = value
+
+            // Se tiver placeholderId, salvar também com ele
+            if (field.placeholderId) {
+              recipientDataForDb[field.placeholderId] = value
+            }
+
+            // Garantir que também existe com chaves comuns de nome
+            recipientDataForDb["nome"] = value
+            recipientDataForDb["name"] = value
+            recipientDataForDb["nome_completo"] = value
+            recipientDataForDb["Nome"] = value
+            recipientDataForDb["NAME"] = value
+            recipientDataForDb["full_name"] = value
+            recipientDataForDb["fullName"] = value
+            recipientDataForDb["recipient_name"] = value
+            recipientDataForDb["participante"] = value
+            recipientDataForDb["Participante"] = value
+
+            console.log(`[Form] Nome salvo com múltiplas chaves:`, {
+              [field.id]: value,
+              [field.placeholderId || "no-placeholder"]: value,
+              nome: value,
+              name: value,
+              participante: value,
             })
           } else {
             // Para outros campos, manter o comportamento original

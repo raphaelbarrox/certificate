@@ -12,21 +12,21 @@ async function imageUrlToDataUrl(url: string): Promise<string> {
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
   console.log(`[v0] [Email] 🚀 Iniciando processo de envio para certificado ${certificateNumber}`)
-  
+
   // DEBUG: Ver toda a estrutura do template
   console.log(`[v0] [Email] Template completo:`, {
     hasFormDesign: !!template.form_design,
     formDesignKeys: Object.keys(template.form_design || {}),
     hasDesign: !!template.form_design?.design,
     hasEmailConfig: !!template.form_design?.emailConfig,
-    hasDesignEmailConfig: !!template.form_design?.design?.emailConfig
+    hasDesignEmailConfig: !!template.form_design?.design?.emailConfig,
   })
 
   // CORREÇÃO PRINCIPAL: Buscar emailConfig no lugar CORRETO
   // Tenta primeiro em form_design.design.emailConfig (estrutura nova)
   // Se não encontrar, tenta em form_design.emailConfig (estrutura antiga/legado)
-  let emailConfig = template.form_design?.design?.emailConfig || template.form_design?.emailConfig
-  
+  const emailConfig = template.form_design?.design?.emailConfig || template.form_design?.emailConfig
+
   console.log(`[v0] [Email] EmailConfig encontrado:`, !!emailConfig)
   console.log(`[v0] [Email] EmailConfig completo:`, JSON.stringify(emailConfig, null, 2))
 
@@ -37,11 +37,12 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   }
 
   // Verificação robusta do enabled - aceita múltiplos formatos
-  const isEnabled = emailConfig.enabled === true || 
-                   emailConfig.enabled === "true" || 
-                   emailConfig.enabled === 1 || 
-                   emailConfig.enabled === "1"
-  
+  const isEnabled =
+    emailConfig.enabled === true ||
+    emailConfig.enabled === "true" ||
+    emailConfig.enabled === 1 ||
+    emailConfig.enabled === "1"
+
   console.log(`[v0] [Email] Toggle enabled (raw):`, emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (tipo):`, typeof emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (convertido):`, isEnabled)
@@ -73,28 +74,26 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   }
 
   // Busca aprimorada do email do destinatário
-  let recipientEmail = recipientData.default_email || 
-                       recipientData.email || 
-                       recipientData.recipient_email
-  
+  let recipientEmail = recipientData.default_email || recipientData.email || recipientData.recipient_email
+
   // Se não encontrou nas chaves padrão, busca em QUALQUER campo que tenha @
   if (!recipientEmail) {
     console.log(`[v0] [Email] Email não encontrado nas chaves padrão, buscando em todos os campos...`)
     for (const [key, value] of Object.entries(recipientData)) {
-      if (typeof value === 'string' && value.includes('@')) {
+      if (typeof value === "string" && value.includes("@")) {
         recipientEmail = value
         console.log(`[v0] [Email] Email encontrado na chave '${key}': ${recipientEmail}`)
         break
       }
     }
   }
-  
+
   console.log(`[v0] [Email] Buscando email do destinatário:`, {
     default_email: recipientData.default_email,
     email: recipientData.email,
     recipient_email: recipientData.recipient_email,
     emailEncontrado: recipientEmail,
-    todasAsChaves: Object.keys(recipientData)
+    todasAsChaves: Object.keys(recipientData),
   })
 
   if (!recipientEmail || typeof recipientEmail !== "string" || !recipientEmail.trim()) {
@@ -127,31 +126,33 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     from: `${senderName || "Sistema"} <${senderEmail}>`,
     to: recipientEmail,
     subject: subject,
-    bodyLength: body.length
+    bodyLength: body.length,
   })
 
   try {
-    // Preparação dos dados para substituição
+    console.log(`[v0] [Email] === DADOS RECEBIDOS DO FORMULÁRIO ===`)
+    console.log(`[v0] [Email] Todas as chaves disponíveis:`, Object.keys(recipientData))
+    console.log(`[v0] [Email] Dados completos:`, JSON.stringify(recipientData, null, 2))
+    console.log(`[v0] [Email] ==========================================`)
+
+    // Preparação dos dados para substituição - usar EXATAMENTE os dados que vieram
     const emailData: Record<string, any> = {
       // Dados do certificado
       certificate_link: pdfUrl,
       certificate_id: certificateNumber,
-      
-      // Dados do destinatário - incluir TODOS os campos
+
+      // Dados do destinatário - incluir TODOS os campos EXATOS
       ...recipientData,
-      
-      // Garantir que campos comuns existam
-      nome: recipientData.nome || 
-            recipientData.name || 
-            recipientData.nome_completo || 
-            recipientData.Nome || 
-            recipientData.NAME || 
-            "Destinatário",
+
+      // Garantir que campos de email existam
       email: recipientEmail,
-      default_email: recipientEmail
+      default_email: recipientEmail,
     }
 
-    console.log(`[v0] [Email] Dados disponíveis para substituição:`, Object.keys(emailData))
+    console.log(`[v0] [Email] Dados finais para substituição:`, Object.keys(emailData))
+    console.log(`[v0] [Email] Verificando se 'nome' existe:`, emailData.nome)
+    console.log(`[v0] [Email] Verificando se 'name' existe:`, emailData.name)
+    console.log(`[v0] [Email] Verificando se 'participante' existe:`, emailData.participante)
 
     // Substituição das variáveis no corpo e assunto
     let finalBody = String(body)
@@ -160,12 +161,12 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     // Realizar substituições - aceita {{var}} e {{ var }} (com espaços)
     Object.keys(emailData).forEach((key) => {
       const value = emailData[key] || ""
-      
+
       // Substituir {{key}} (exato)
       const regex1 = new RegExp(`{{${key}}}`, "gi")
       finalBody = finalBody.replace(regex1, String(value))
       finalSubject = finalSubject.replace(regex1, String(value))
-      
+
       // Substituir {{ key }} (com espaços)
       const regex2 = new RegExp(`{{\\s*${key}\\s*}}`, "gi")
       finalBody = finalBody.replace(regex2, String(value))
@@ -206,7 +207,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   } catch (error) {
     console.error(`[v0] [Email] ❌ === ERRO INESPERADO ===`)
     console.error(`[v0] [Email] ❌ Erro:`, error)
-    console.error(`[v0] [Email] ❌ Stack:`, error instanceof Error ? error.stack : 'N/A')
+    console.error(`[v0] [Email] ❌ Stack:`, error instanceof Error ? error.stack : "N/A")
     console.error(`[v0] [Email] ❌ Tipo do erro:`, typeof error)
     console.error(`[v0] [Email] ❌ ======================`)
     return { success: false, reason: error instanceof Error ? error.message : "Erro desconhecido" }
@@ -220,22 +221,23 @@ export async function POST(request: NextRequest) {
 
   try {
     const requestData = await request.json()
-    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } = requestData
+    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
+      requestData
 
     // DEBUG: Log para rastrear os dados recebidos
     console.log(`[API] ====== INÍCIO DO PROCESSAMENTO ======`)
     console.log(`[API] Template ID: ${template_id}`)
-    console.log(`[API] Certificate Update: ${certificate_number_to_update || 'NOVO'}`)
+    console.log(`[API] Certificate Update: ${certificate_number_to_update || "NOVO"}`)
     console.log(`[API] Recipient Data Keys:`, Object.keys(recipient_data || {}))
     console.log(`[API] Recipient Data Completo:`, JSON.stringify(recipient_data, null, 2))
-    
+
     // Verificar especificamente campos de email
-    const emailFields = Object.entries(recipient_data || {})
-      .filter(([key, value]) => 
-        key.toLowerCase().includes('email') || 
-        key.toLowerCase().includes('mail') ||
-        (typeof value === 'string' && value.includes('@'))
-      )
+    const emailFields = Object.entries(recipient_data || {}).filter(
+      ([key, value]) =>
+        key.toLowerCase().includes("email") ||
+        key.toLowerCase().includes("mail") ||
+        (typeof value === "string" && value.includes("@")),
+    )
     console.log(`[API] Campos relacionados a email encontrados:`, emailFields)
     console.log(`[API] =====================================`)
 
