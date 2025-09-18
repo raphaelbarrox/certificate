@@ -56,19 +56,29 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     return { success: false, reason: `Campos obrigatórios não preenchidos: ${missingFields.join(", ")}` }
   }
 
-  const recipientEmail = recipientData.default_email
-  console.log(`[v0] [Email] Buscando APENAS default_email:`, {
+  const recipientEmail = recipientData.default_email || recipientData.email || recipientData.recipient_email
+  console.log(`[v0] [Email] Buscando email do destinatário:`, {
     default_email: recipientData.default_email,
+    email: recipientData.email,
+    recipient_email: recipientData.recipient_email,
     emailEncontrado: recipientEmail,
   })
 
   if (!recipientEmail || typeof recipientEmail !== "string" || !recipientEmail.trim()) {
-    console.error(`[v0] [Email] ❌ default_email não encontrado`)
+    console.error(`[v0] [Email] ❌ Email do destinatário não encontrado`)
     console.error(`[v0] [Email] Dados completos do destinatário:`, JSON.stringify(recipientData, null, 2))
-    return { success: false, reason: "Campo default_email não encontrado nos dados fornecidos" }
+    return { success: false, reason: "Email do destinatário não encontrado nos dados fornecidos" }
   }
 
-  console.log(`[v0] [Email] ✅ default_email confirmado: ${recipientEmail}`)
+  console.log(`[v0] [Email] ✅ Email do destinatário confirmado: ${recipientEmail}`)
+
+  console.log(`[v0] [Email] Configuração extraída:`, {
+    senderName: senderName || "Não definido",
+    senderEmail: senderEmail || "Não definido",
+    subject: subject || "Não definido",
+    body: body ? `Definido (${body.length} caracteres)` : "Não definido",
+    recipientEmail: recipientEmail,
+  })
 
   if (!EmailService.validateEmailDomain(senderEmail)) {
     console.error(`[v0] [Email] ❌ Domínio inválido: ${senderEmail}`)
@@ -300,7 +310,7 @@ export async function POST(request: NextRequest) {
         .from("issued_certificates")
         .update({
           recipient_data: recipient_data,
-          recipient_email: recipient_data.default_email,
+          recipient_email: recipient_data.default_email || recipient_data.email,
           photo_url: photo_url || null,
           pdf_url: pdf_url,
           updated_at: new Date().toISOString(),
@@ -338,7 +348,7 @@ export async function POST(request: NextRequest) {
         .insert({
           template_id: template_id,
           recipient_data: recipient_data,
-          recipient_email: recipient_data.default_email,
+          recipient_email: recipient_data.default_email || recipient_data.email,
           certificate_number: certificateNumber,
           photo_url: photo_url || null,
           pdf_url: pdf_url,
