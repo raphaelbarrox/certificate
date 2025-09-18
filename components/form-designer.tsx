@@ -39,7 +39,6 @@ import {
   Check,
   Send,
   Loader2,
-  Play,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -166,8 +165,6 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
   const { toast } = useToast()
   const [isInitialized, setIsInitialized] = useState(false)
   const [isTestingSmtp, setIsTestingSmtp] = useState(false)
-  const [certificateLogs, setCertificateLogs] = useState<string[]>([])
-  const [isListeningLogs, setIsListeningLogs] = useState(false)
 
   // Drag and drop state
   const dragField = useRef<number | null>(null)
@@ -567,57 +564,6 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
         </div>
       </div>
     )
-  }
-
-  const startListeningCertificateLogs = () => {
-    setIsListeningLogs(true)
-    setCertificateLogs([])
-
-    let pollCount = 0
-    const maxPolls = 150 // 5 minutos com polling a cada 2 segundos
-
-    // Polling otimizado para capturar logs
-    const interval = setInterval(async () => {
-      try {
-        pollCount++
-        const response = await fetch("/api/certificate-logs")
-        if (response.ok) {
-          const data = await response.json()
-          if (data.logs && data.logs.length > 0) {
-            setCertificateLogs(data.logs) // Substitui todos os logs para evitar duplicatas
-            console.log(`[LOGS-UI] Capturados ${data.count} logs (poll #${pollCount})`)
-          }
-        }
-
-        // Para após 5 minutos ou 150 polls
-        if (pollCount >= maxPolls) {
-          clearInterval(interval)
-          setIsListeningLogs(false)
-          console.log("[LOGS-UI] Monitoramento finalizado após 5 minutos")
-        }
-      } catch (error) {
-        console.error("[LOGS-UI] Erro ao capturar logs:", error)
-      }
-    }, 2000)
-
-    // Cleanup em caso de desmontagem do componente
-    return () => {
-      clearInterval(interval)
-      setIsListeningLogs(false)
-    }
-  }
-
-  const clearCertificateLogs = async () => {
-    try {
-      const response = await fetch("/api/certificate-logs", { method: "DELETE" })
-      if (response.ok) {
-        const data = await response.json()
-        setCertificateLogs([])
-        console.log(`[LOGS-UI] ${data.clearedCount} logs limpos com sucesso`)
-      }
-    } catch (error) {
-      console.error("[LOGS-UI] Erro ao limpar logs:", error)
-    }
   }
 
   return (
@@ -1168,76 +1114,6 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                 Enviará um email de teste para verificar se o sistema está funcionando
                               </p>
                             </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card>
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <FileText className="h-4 w-4" />
-                              Logs de Emissão de Certificado
-                            </CardTitle>
-                            <p className="text-xs text-gray-600">
-                              Monitore em tempo real as tentativas de emissão de certificado
-                            </p>
-                          </CardHeader>
-                          <CardContent className="space-y-4">
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={startListeningCertificateLogs}
-                                disabled={isListeningLogs}
-                                className="flex-1 bg-transparent"
-                              >
-                                {isListeningLogs ? (
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Play className="h-4 w-4 mr-2" />
-                                )}
-                                {isListeningLogs ? "Monitorando..." : "Iniciar Monitoramento"}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={clearCertificateLogs}
-                                disabled={certificateLogs.length === 0}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-
-                            <div className="bg-black text-green-400 p-3 rounded-lg font-mono text-xs max-h-60 overflow-y-auto">
-                              {certificateLogs.length === 0 ? (
-                                <div className="text-gray-500">
-                                  {isListeningLogs
-                                    ? "🔄 Monitoramento ativo - aguardando logs de certificado..."
-                                    : "📋 Clique em 'Iniciar Monitoramento' para capturar logs em tempo real"}
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="text-yellow-400 mb-2 border-b border-gray-700 pb-1">
-                                    📊 {certificateLogs.length} logs capturados - Mais recentes primeiro:
-                                  </div>
-                                  {certificateLogs.map((log, index) => (
-                                    <div key={index} className="mb-1 leading-relaxed">
-                                      {log}
-                                    </div>
-                                  ))}
-                                </>
-                              )}
-                            </div>
-
-                            <p className="text-xs text-gray-500 flex items-center justify-between">
-                              <span>
-                                {isListeningLogs
-                                  ? "🟢 Monitoramento ativo - captura automática a cada 2s"
-                                  : "⚪ Monitoramento inativo"}
-                              </span>
-                              {certificateLogs.length > 0 && (
-                                <span className="text-blue-600">{certificateLogs.length} logs salvos</span>
-                              )}
-                            </p>
                           </CardContent>
                         </Card>
                       </div>
