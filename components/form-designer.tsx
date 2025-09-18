@@ -123,11 +123,11 @@ const defaultDesign: FormDesign = {
   footerEnabled: true,
   footerText: "Powered by CertGen • Certificados digitais profissionais",
   emailConfig: {
-    enabled: false,
-    senderName: "",
-    senderEmail: "",
+    enabled: true, // Ativado por padrão
+    senderName: "Sistema de Certificados", // Nome padrão preenchido
+    senderEmail: "certificados@therapist.international", // Email padrão preenchido
     subject: "Seu certificado está pronto!",
-    body: `<p>Olá {{nome_completo}},</p><p>Seu certificado foi emitido com sucesso. Clique no link abaixo para fazer o download:</p><p><a href="{{certificate_link}}">Baixar Certificado</a></p><p>Número do Certificado: {{certificate_id}}</p>`,
+    body: `<p>Olá {{nome}},</p><p>Seu certificado foi emitido com sucesso. Clique no link abaixo para fazer o download:</p><p><a href="{{certificate_link}}" style="background-color: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Baixar Certificado</a></p><p>Número do Certificado: {{certificate_id}}</p><p>Atenciosamente,<br>Equipe de Certificados</p>`, // Usando {{nome}} em vez de {{nome_completo}} e melhorando o HTML
   },
 }
 
