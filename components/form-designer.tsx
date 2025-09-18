@@ -573,31 +573,51 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
     setIsListeningLogs(true)
     setCertificateLogs([])
 
-    // Polling para capturar logs
+    let pollCount = 0
+    const maxPolls = 150 // 5 minutos com polling a cada 2 segundos
+
+    // Polling otimizado para capturar logs
     const interval = setInterval(async () => {
       try {
+        pollCount++
         const response = await fetch("/api/certificate-logs")
         if (response.ok) {
           const data = await response.json()
           if (data.logs && data.logs.length > 0) {
-            setCertificateLogs((prev) => [...prev, ...data.logs])
+            setCertificateLogs(data.logs) // Substitui todos os logs para evitar duplicatas
+            console.log(`[LOGS-UI] Capturados ${data.count} logs (poll #${pollCount})`)
           }
         }
+
+        // Para após 5 minutos ou 150 polls
+        if (pollCount >= maxPolls) {
+          clearInterval(interval)
+          setIsListeningLogs(false)
+          console.log("[LOGS-UI] Monitoramento finalizado após 5 minutos")
+        }
       } catch (error) {
-        console.error("Erro ao capturar logs:", error)
+        console.error("[LOGS-UI] Erro ao capturar logs:", error)
       }
     }, 2000)
 
-    // Parar após 5 minutos
-    setTimeout(() => {
+    // Cleanup em caso de desmontagem do componente
+    return () => {
       clearInterval(interval)
       setIsListeningLogs(false)
-    }, 300000)
+    }
   }
 
-  const clearCertificateLogs = () => {
-    setCertificateLogs([])
-    fetch("/api/certificate-logs", { method: "DELETE" }).catch(console.error)
+  const clearCertificateLogs = async () => {
+    try {
+      const response = await fetch("/api/certificate-logs", { method: "DELETE" })
+      if (response.ok) {
+        const data = await response.json()
+        setCertificateLogs([])
+        console.log(`[LOGS-UI] ${data.clearedCount} logs limpos com sucesso`)
+      }
+    } catch (error) {
+      console.error("[LOGS-UI] Erro ao limpar logs:", error)
+    }
   }
 
   return (
@@ -1191,22 +1211,32 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                               {certificateLogs.length === 0 ? (
                                 <div className="text-gray-500">
                                   {isListeningLogs
-                                    ? "Aguardando logs..."
-                                    : "Clique em 'Iniciar Monitoramento' para ver os logs"}
+                                    ? "🔄 Monitoramento ativo - aguardando logs de certificado..."
+                                    : "📋 Clique em 'Iniciar Monitoramento' para capturar logs em tempo real"}
                                 </div>
                               ) : (
-                                certificateLogs.map((log, index) => (
-                                  <div key={index} className="mb-1">
-                                    {log}
+                                <>
+                                  <div className="text-yellow-400 mb-2 border-b border-gray-700 pb-1">
+                                    📊 {certificateLogs.length} logs capturados - Mais recentes primeiro:
                                   </div>
-                                ))
+                                  {certificateLogs.map((log, index) => (
+                                    <div key={index} className="mb-1 leading-relaxed">
+                                      {log}
+                                    </div>
+                                  ))}
+                                </>
                               )}
                             </div>
 
-                            <p className="text-xs text-gray-500">
-                              {isListeningLogs
-                                ? "Monitoramento ativo por 5 minutos"
-                                : "Logs mostram tentativas de emissão de certificado"}
+                            <p className="text-xs text-gray-500 flex items-center justify-between">
+                              <span>
+                                {isListeningLogs
+                                  ? "🟢 Monitoramento ativo - captura automática a cada 2s"
+                                  : "⚪ Monitoramento inativo"}
+                              </span>
+                              {certificateLogs.length > 0 && (
+                                <span className="text-blue-600">{certificateLogs.length} logs salvos</span>
+                              )}
                             </p>
                           </CardContent>
                         </Card>
