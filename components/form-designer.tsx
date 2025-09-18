@@ -35,9 +35,9 @@ import {
   Upload,
   X,
   GripVertical,
-  Send,
-  Server,
   Copy,
+  Check,
+  Send,
   Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
@@ -72,13 +72,6 @@ interface EmailConfig {
   senderEmail: string
   subject: string
   body: string
-  smtp: {
-    host: string
-    port: number
-    user: string
-    pass: string
-    secure: boolean
-  }
 }
 
 interface FormDesign {
@@ -135,13 +128,6 @@ const defaultDesign: FormDesign = {
     senderEmail: "",
     subject: "Seu certificado está pronto!",
     body: `<p>Olá {{nome_completo}},</p><p>Seu certificado foi emitido com sucesso. Clique no link abaixo para fazer o download:</p><p><a href="{{certificate_link}}">Baixar Certificado</a></p><p>Número do Certificado: {{certificate_id}}</p>`,
-    smtp: {
-      host: "",
-      port: 587,
-      user: "",
-      pass: "",
-      secure: false,
-    },
   },
 }
 
@@ -228,21 +214,22 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
     }
   }, [editingField])
 
-  const handleTestSmtp = async (action: "verify" | "send") => {
-    const { smtp, senderEmail } = design.emailConfig
-    if (!smtp.host || !smtp.port || !smtp.user || !smtp.pass) {
+  const handleTestEmail = async () => {
+    const { senderEmail, senderName } = design.emailConfig
+
+    if (!senderEmail) {
       toast({
-        title: "Campos Obrigatórios",
-        description: "Por favor, preencha todos os campos de configuração SMTP.",
+        title: "Email Obrigatório",
+        description: "Por favor, preencha o campo 'Email do Remetente' para enviar um teste.",
         variant: "destructive",
       })
       return
     }
 
-    if (action === "send" && !senderEmail) {
+    if (!senderEmail.endsWith("@therapist.international")) {
       toast({
-        title: "Email do Remetente Necessário",
-        description: "Por favor, preencha o campo 'Email do Remetente' para enviar um teste.",
+        title: "Domínio Inválido",
+        description: "O email deve ser do domínio therapist.international",
         variant: "destructive",
       })
       return
@@ -250,19 +237,19 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
 
     setIsTestingSmtp(true)
     try {
-      const response = await fetch("/api/templates/test-email", {
+      const response = await fetch("/api/email/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action,
-          config: design.emailConfig,
+          senderEmail,
+          senderName,
         }),
       })
 
       const result = await response.json()
 
       if (!response.ok) {
-        throw new Error(result.error || "Falha no teste. Verifique os logs do servidor.")
+        throw new Error(result.error || "Falha no teste de email.")
       }
 
       toast({
@@ -272,9 +259,9 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ocorreu um erro desconhecido."
-      console.error(`[SMTP Debug] Erro na ação '${action}':`, message)
+      console.error(`[Email Test Error]:`, message)
       toast({
-        title: "Erro no Teste SMTP",
+        title: "Erro no Teste de Email",
         description: message,
         variant: "destructive",
         duration: 9000,
@@ -998,6 +985,9 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                         <Card>
                           <CardHeader className="pb-2">
                             <CardTitle className="text-sm">Conteúdo do Email</CardTitle>
+                            <p className="text-xs text-gray-600">
+                              Configure o conteúdo do email que será enviado automaticamente com o certificado
+                            </p>
                           </CardHeader>
                           <CardContent className="space-y-3">
                             <div className="grid grid-cols-2 gap-3">
@@ -1026,9 +1016,10 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                       emailConfig: { ...prev.emailConfig, senderEmail: e.target.value },
                                     }))
                                   }
-                                  placeholder="contato@suaempresa.com"
+                                  placeholder="contato@therapist.international"
                                   className="text-sm"
                                 />
+                                <p className="text-xs text-gray-500">Use um email do domínio therapist.international</p>
                               </div>
                             </div>
                             <div className="space-y-1">
@@ -1057,6 +1048,7 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                 }
                                 className="min-h-[150px] text-sm font-mono"
                                 rows={8}
+                                placeholder="Olá {{nome}},&#10;&#10;Parabéns! Seu certificado está pronto.&#10;&#10;Acesse: {{certificate_link}}"
                               />
                             </div>
                             <div>
@@ -1083,119 +1075,32 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
 
                         <Card>
                           <CardHeader className="pb-2">
-                            <CardTitle className="text-sm">Configurações SMTP</CardTitle>
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Mail className="h-4 w-4" />
+                              Sistema de Email Nativo
+                            </CardTitle>
+                            <p className="text-xs text-gray-600">
+                              Sistema integrado usando Resend API com domínio therapist.international
+                            </p>
                           </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="space-y-1">
-                              <Label className="text-xs">Servidor SMTP</Label>
-                              <Input
-                                value={design.emailConfig.smtp.host}
-                                onChange={(e) =>
-                                  setDesign((prev) => ({
-                                    ...prev,
-                                    emailConfig: {
-                                      ...prev.emailConfig,
-                                      smtp: { ...prev.emailConfig.smtp, host: e.target.value },
-                                    },
-                                  }))
-                                }
-                                placeholder="smtp.example.com"
-                                className="text-sm"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <Label className="text-xs">Porta</Label>
-                                <Input
-                                  type="number"
-                                  value={design.emailConfig.smtp.port}
-                                  onChange={(e) =>
-                                    setDesign((prev) => ({
-                                      ...prev,
-                                      emailConfig: {
-                                        ...prev.emailConfig,
-                                        smtp: { ...prev.emailConfig.smtp, port: Number(e.target.value) },
-                                      },
-                                    }))
-                                  }
-                                  placeholder="587"
-                                  className="text-sm"
-                                />
-                              </div>
-                              <div className="flex items-end pb-1">
-                                <div className="flex items-center space-x-2">
-                                  <Switch
-                                    checked={design.emailConfig.smtp.secure}
-                                    onCheckedChange={(checked) =>
-                                      setDesign((prev) => ({
-                                        ...prev,
-                                        emailConfig: {
-                                          ...prev.emailConfig,
-                                          smtp: { ...prev.emailConfig.smtp, secure: checked },
-                                        },
-                                      }))
-                                    }
-                                  />
-                                  <Label className="text-xs">Usar TLS/SSL</Label>
+                          <CardContent className="space-y-4">
+                            <div className="flex items-center justify-center p-6 bg-green-50 rounded-lg border border-green-200">
+                              <div className="text-center">
+                                <div className="flex items-center justify-center w-12 h-12 bg-green-100 rounded-full mx-auto mb-3">
+                                  <Check className="h-6 w-6 text-green-600" />
                                 </div>
+                                <p className="text-sm font-medium text-green-800">Sistema Configurado</p>
+                                <p className="text-xs text-green-600 mt-1">
+                                  Emails serão enviados automaticamente via therapist.international
+                                </p>
                               </div>
                             </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Usuário/Login</Label>
-                              <Input
-                                value={design.emailConfig.smtp.user}
-                                onChange={(e) =>
-                                  setDesign((prev) => ({
-                                    ...prev,
-                                    emailConfig: {
-                                      ...prev.emailConfig,
-                                      smtp: { ...prev.emailConfig.smtp, user: e.target.value },
-                                    },
-                                  }))
-                                }
-                                placeholder="seu_usuario_smtp"
-                                className="text-sm"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">Senha</Label>
-                              <Input
-                                type="password"
-                                value={design.emailConfig.smtp.pass}
-                                onChange={(e) =>
-                                  setDesign((prev) => ({
-                                    ...prev,
-                                    emailConfig: {
-                                      ...prev.emailConfig,
-                                      smtp: { ...prev.emailConfig.smtp, pass: e.target.value },
-                                    },
-                                  }))
-                                }
-                                placeholder="••••••••••••"
-                                className="text-sm"
-                              />
-                              <p className="text-xs text-gray-500">
-                                Recomendamos o uso de uma senha de aplicativo específica.
-                              </p>
-                            </div>
-                            <div className="flex gap-2 pt-2">
+
+                            <div className="pt-2">
                               <Button
                                 variant="outline"
-                                onClick={() => handleTestSmtp("verify")}
-                                disabled={isTestingSmtp}
-                                className="w-full text-sm bg-transparent"
-                              >
-                                {isTestingSmtp ? (
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Server className="h-4 w-4 mr-2" />
-                                )}
-                                {isTestingSmtp ? "Testando..." : "Testar Conexão"}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                onClick={() => handleTestSmtp("send")}
-                                disabled={isTestingSmtp}
+                                onClick={handleTestEmail}
+                                disabled={isTestingSmtp || !design.emailConfig.senderEmail}
                                 className="w-full text-sm bg-transparent"
                               >
                                 {isTestingSmtp ? (
@@ -1203,8 +1108,11 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                 ) : (
                                   <Send className="h-4 w-4 mr-2" />
                                 )}
-                                {isTestingSmtp ? "Enviando..." : "Enviar Teste"}
+                                {isTestingSmtp ? "Enviando..." : "Testar Envio de Email"}
                               </Button>
+                              <p className="text-xs text-gray-500 mt-2 text-center">
+                                Enviará um email de teste para verificar se o sistema está funcionando
+                              </p>
                             </div>
                           </CardContent>
                         </Card>
