@@ -295,7 +295,7 @@ export async function POST(request: NextRequest) {
       issuedCertificateData = newCertificate
     }
 
-    sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url)
+    await sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url)
 
     return NextResponse.json(issuedCertificateData)
   } catch (error) {
