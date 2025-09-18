@@ -24,27 +24,26 @@ async function sendLogToAPI(message: string) {
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
   await sendLogToAPI(`🚀 INICIANDO PROCESSO DE ENVIO DE EMAIL - Certificado: ${certificateNumber}`)
-  console.log(`[Email] 🚀 INICIANDO PROCESSO DE ENVIO DE EMAIL`)
-  console.log(`[Email] Template ID: ${template.id}`)
-  console.log(`[Email] Certificado: ${certificateNumber}`)
-  console.log(`[Email] PDF URL: ${pdfUrl}`)
-
-  console.log(`[Email] Template completo:`, JSON.stringify(template, null, 2))
+  console.log(`[v0] 🚀 INICIANDO PROCESSO DE ENVIO DE EMAIL`)
+  console.log(`[v0] Template ID: ${template.id}`)
+  console.log(`[v0] Certificado: ${certificateNumber}`)
+  console.log(`[v0] PDF URL: ${pdfUrl}`)
+  console.log(`[v0] Template completo:`, JSON.stringify(template, null, 2))
 
   const emailConfig = template.form_design?.emailConfig
-  console.log(`[Email] Configuração de email:`, JSON.stringify(emailConfig, null, 2))
+  console.log(`[v0] Configuração de email:`, JSON.stringify(emailConfig, null, 2))
 
   if (!emailConfig || !emailConfig.enabled) {
     await sendLogToAPI(
       `❌ ENVIO DESATIVADO - Template ${template.id} - emailConfig=${!!emailConfig}, enabled=${emailConfig?.enabled}`,
     )
-    console.log(`[Email] ❌ Envio desativado para o template ${template.id}.`)
-    console.log(`[Email] Motivo: emailConfig=${!!emailConfig}, enabled=${emailConfig?.enabled}`)
+    console.log(`[v0] ❌ Envio desativado para o template ${template.id}.`)
+    console.log(`[v0] Motivo: emailConfig=${!!emailConfig}, enabled=${emailConfig?.enabled}`)
     return
   }
 
   await sendLogToAPI(`✅ EMAIL ATIVADO - Prosseguindo com envio`)
-  console.log(`[Email] ✅ Email está ATIVADO - prosseguindo...`)
+  console.log(`[v0] ✅ Email está ATIVADO - prosseguindo...`)
 
   const { senderName, senderEmail, subject, body } = emailConfig
   const recipientEmail = recipientData.default_email || recipientData.email
@@ -52,31 +51,31 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
   await sendLogToAPI(
     `📧 DADOS DO EMAIL - De: ${senderName} <${senderEmail}> | Para: ${recipientEmail} | Assunto: ${subject}`,
   )
-  console.log(`[Email] Dados do remetente:`)
-  console.log(`[Email] - Nome: ${senderName}`)
-  console.log(`[Email] - Email: ${senderEmail}`)
-  console.log(`[Email] - Assunto: ${subject}`)
-  console.log(`[Email] - Corpo (primeiros 50 chars): ${body?.substring(0, 50)}...`)
-  console.log(`[Email] Destinatário: ${recipientEmail}`)
-  console.log(`[Email] Dados do destinatário completos:`, JSON.stringify(recipientData, null, 2))
+  console.log(`[v0] Dados do remetente:`)
+  console.log(`[v0] - Nome: ${senderName}`)
+  console.log(`[v0] - Email: ${senderEmail}`)
+  console.log(`[v0] - Assunto: ${subject}`)
+  console.log(`[v0] - Corpo (primeiros 50 chars): ${body?.substring(0, 50)}...`)
+  console.log(`[v0] Destinatário: ${recipientEmail}`)
+  console.log(`[v0] Dados do destinatário completos:`, JSON.stringify(recipientData, null, 2))
 
   if (!recipientEmail) {
     await sendLogToAPI(
       `❌ ERRO CRÍTICO - Nenhum email de destinatário encontrado para certificado ${certificateNumber}`,
     )
-    console.error(`[Email] ❌ ERRO: Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
+    console.error(`[v0] ❌ ERRO: Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
     return
   }
 
   if (!EmailService.validateEmailDomain(senderEmail)) {
     await sendLogToAPI(`❌ ERRO DOMÍNIO - Email remetente deve ser @therapist.international: ${senderEmail}`)
-    console.error(`[Email] ❌ ERRO: Email do remetente deve ser do domínio therapist.international: ${senderEmail}`)
+    console.error(`[v0] ❌ ERRO: Email do remetente deve ser do domínio therapist.international: ${senderEmail}`)
     return
   }
 
   try {
     await sendLogToAPI(`📧 PROCESSANDO TEMPLATE - Substituindo placeholders no email`)
-    console.log(`[Email] 📧 Processando template do email...`)
+    console.log(`[v0] 📧 Processando template do email...`)
 
     let finalBody = body
     let finalSubject = subject
@@ -87,7 +86,7 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       certificate_id: certificateNumber,
     }
 
-    console.log(`[Email] Dados para substituição:`, Object.keys(allData))
+    console.log(`[v0] Dados para substituição:`, Object.keys(allData))
 
     for (const key in allData) {
       const regex = new RegExp(`{{${key}}}`, "g")
@@ -95,11 +94,11 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       finalSubject = finalSubject.replace(regex, allData[key])
     }
 
-    console.log(`[Email] Assunto final: ${finalSubject}`)
-    console.log(`[Email] Corpo processado (primeiros 100 chars): ${finalBody.substring(0, 100)}...`)
+    console.log(`[v0] Assunto final: ${finalSubject}`)
+    console.log(`[v0] Corpo processado (primeiros 100 chars): ${finalBody.substring(0, 100)}...`)
 
     await sendLogToAPI(`🚀 ENVIANDO EMAIL VIA RESEND - Para: ${recipientEmail}`)
-    console.log(`[Email] 🚀 ENVIANDO EMAIL VIA RESEND...`)
+    console.log(`[v0] 🚀 ENVIANDO EMAIL VIA RESEND...`)
     const result = await EmailService.sendEmail({
       from: EmailService.formatSenderEmail(senderName || "Sistema", senderEmail),
       to: recipientEmail,
@@ -107,20 +106,20 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       html: finalBody,
     })
 
-    console.log(`[Email] Resultado do envio:`, JSON.stringify(result, null, 2))
+    console.log(`[v0] Resultado do envio:`, JSON.stringify(result, null, 2))
 
     if (result.success) {
       await sendLogToAPI(`✅ EMAIL ENVIADO COM SUCESSO! ID: ${result.messageId} - Para: ${recipientEmail}`)
-      console.log(`[Email] ✅ SUCESSO! Mensagem enviada. ID: ${result.messageId}`)
+      console.log(`[v0] ✅ SUCESSO! Mensagem enviada. ID: ${result.messageId}`)
     } else {
       await sendLogToAPI(`❌ FALHA NO ENVIO - Erro: ${result.error} - Para: ${recipientEmail}`)
-      console.error(`[Email] ❌ FALHA no envio: ${result.error}`)
+      console.error(`[v0] ❌ FALHA no envio: ${result.error}`)
     }
   } catch (error) {
     await sendLogToAPI(`❌ ERRO CRÍTICO NO ENVIO - ${error} - Para: ${recipientEmail}`)
-    console.error(`[Email] ❌ ERRO CRÍTICO ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`)
-    console.error(`[Email] Erro:`, error)
-    console.error(`[Email] Stack:`, (error as Error).stack)
+    console.error(`[v0] ❌ ERRO CRÍTICO ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`)
+    console.error(`[v0] Erro:`, error)
+    console.error(`[v0] Stack:`, (error as Error).stack)
   }
 }
 
@@ -130,8 +129,36 @@ export async function POST(request: NextRequest) {
   let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
+    let requestData
+    try {
+      const requestText = await request.text()
+      console.log("[API] Raw request body:", requestText.substring(0, 200) + "...")
+
+      if (!requestText.trim()) {
+        throw new Error("Request body is empty")
+      }
+
+      // Verificar se o conteúdo parece ser JSON
+      if (!requestText.trim().startsWith("{") && !requestText.trim().startsWith("[")) {
+        throw new Error(`Request body is not JSON format. Content starts with: "${requestText.substring(0, 50)}..."`)
+      }
+
+      requestData = JSON.parse(requestText)
+      console.log("[API] Successfully parsed JSON request")
+    } catch (parseError) {
+      await sendLogToAPI(`❌ ERRO DE PARSING JSON - ${parseError}`)
+      console.error("[API] JSON parsing error:", parseError)
+      return NextResponse.json(
+        {
+          error: "Invalid JSON in request body",
+          details: parseError instanceof Error ? parseError.message : "Unknown parsing error",
+        },
+        { status: 400 },
+      )
+    }
+
     const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
-      await request.json()
+      requestData
 
     await sendLogToAPI(`🎯 NOVA SOLICITAÇÃO DE CERTIFICADO - Template: ${template_id}`)
 
@@ -353,16 +380,16 @@ export async function POST(request: NextRequest) {
     }
 
     await sendLogToAPI(`📧 INICIANDO PROCESSO DE EMAIL - Certificado: ${certificateNumber}`)
-    console.log(`[API] 📧 Chamando função de envio de email...`)
-    console.log(`[API] Dados que serão passados para sendCertificateEmail:`)
-    console.log(`[API] - Template ID: ${template.id}`)
-    console.log(`[API] - Recipient data keys: ${Object.keys(recipient_data)}`)
-    console.log(`[API] - Certificate number: ${certificateNumber}`)
-    console.log(`[API] - PDF URL: ${pdf_url}`)
+    console.log(`[v0] 📧 Chamando função de envio de email...`)
+    console.log(`[v0] Dados que serão passados para sendCertificateEmail:`)
+    console.log(`[v0] - Template ID: ${template.id}`)
+    console.log(`[v0] - Recipient data keys: ${Object.keys(recipient_data)}`)
+    console.log(`[v0] - Certificate number: ${certificateNumber}`)
+    console.log(`[v0] - PDF URL: ${pdf_url}`)
 
     await sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url)
     await sendLogToAPI(`✅ PROCESSO COMPLETO - Certificado ${certificateNumber} gerado e email processado`)
-    console.log(`[API] ✅ Função de email executada`)
+    console.log(`[v0] ✅ Função de email executada`)
 
     return NextResponse.json(issuedCertificateData)
   } catch (error) {
