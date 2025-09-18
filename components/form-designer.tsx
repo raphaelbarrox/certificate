@@ -970,12 +970,13 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                     <div className="flex items-center space-x-2">
                       <Switch
                         checked={design.emailConfig.enabled}
-                        onCheckedChange={(checked) =>
+                        onCheckedChange={(checked) => {
+                          console.log(`[v0] [FormDesigner] Toggle alterado para:`, checked, typeof checked)
                           setDesign((prev) => ({
                             ...prev,
-                            emailConfig: { ...prev.emailConfig, enabled: checked },
+                            emailConfig: { ...prev.emailConfig, enabled: Boolean(checked) },
                           }))
-                        }
+                        }}
                       />
                       <Label className="text-xs">Ativar envio automático</Label>
                     </div>
