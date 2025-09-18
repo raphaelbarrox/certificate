@@ -11,27 +11,42 @@ async function imageUrlToDataUrl(url: string): Promise<string> {
 }
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
+  console.log(`[Email] 🚀 INICIANDO PROCESSO DE ENVIO DE EMAIL`)
+  console.log(`[Email] Template ID: ${template.id}`)
+  console.log(`[Email] Certificado: ${certificateNumber}`)
+  console.log(`[Email] PDF URL: ${pdfUrl}`)
+
   const emailConfig = template.form_design?.emailConfig
+  console.log(`[Email] Configuração de email:`, JSON.stringify(emailConfig, null, 2))
+
   if (!emailConfig || !emailConfig.enabled) {
-    console.log(`[Email] Envio desativado para o template ${template.id}.`)
+    console.log(`[Email] ❌ Envio desativado para o template ${template.id}.`)
     return
   }
+
+  console.log(`[Email] ✅ Email está ATIVADO - prosseguindo...`)
 
   const { senderName, senderEmail, subject, body } = emailConfig
   const recipientEmail = recipientData.default_email || recipientData.email
 
+  console.log(`[Email] Dados do remetente:`)
+  console.log(`[Email] - Nome: ${senderName}`)
+  console.log(`[Email] - Email: ${senderEmail}`)
+  console.log(`[Email] - Assunto: ${subject}`)
+  console.log(`[Email] Destinatário: ${recipientEmail}`)
+
   if (!recipientEmail) {
-    console.error(`[Email] Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
+    console.error(`[Email] ❌ ERRO: Nenhum email de destinatário encontrado para o certificado ${certificateNumber}.`)
     return
   }
 
   if (!EmailService.validateEmailDomain(senderEmail)) {
-    console.error(`[Email] Email do remetente deve ser do domínio therapist.international: ${senderEmail}`)
+    console.error(`[Email] ❌ ERRO: Email do remetente deve ser do domínio therapist.international: ${senderEmail}`)
     return
   }
 
   try {
-    console.log(`[Email] Iniciando envio para ${recipientEmail} (Certificado: ${certificateNumber})`)
+    console.log(`[Email] 📧 Processando template do email...`)
 
     let finalBody = body
     let finalSubject = subject
@@ -42,12 +57,18 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       certificate_id: certificateNumber,
     }
 
+    console.log(`[Email] Dados para substituição:`, Object.keys(allData))
+
     for (const key in allData) {
       const regex = new RegExp(`{{${key}}}`, "g")
       finalBody = finalBody.replace(regex, allData[key])
       finalSubject = finalSubject.replace(regex, allData[key])
     }
 
+    console.log(`[Email] Assunto final: ${finalSubject}`)
+    console.log(`[Email] Corpo processado (primeiros 100 chars): ${finalBody.substring(0, 100)}...`)
+
+    console.log(`[Email] 🚀 ENVIANDO EMAIL VIA RESEND...`)
     const result = await EmailService.sendEmail({
       from: EmailService.formatSenderEmail(senderName || "Sistema", senderEmail),
       to: recipientEmail,
@@ -55,14 +76,17 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       html: finalBody,
     })
 
+    console.log(`[Email] Resultado do envio:`, JSON.stringify(result, null, 2))
+
     if (result.success) {
-      console.log(`[Email] Mensagem enviada com sucesso. ID: ${result.messageId}`)
+      console.log(`[Email] ✅ SUCESSO! Mensagem enviada. ID: ${result.messageId}`)
     } else {
-      console.error(`[Email] Falha ao enviar email: ${result.error}`)
+      console.error(`[Email] ❌ FALHA no envio: ${result.error}`)
     }
   } catch (error) {
-    // Log the error but do not throw, to avoid breaking the main flow
-    console.error(`[Email] Falha ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`, error)
+    console.error(`[Email] ❌ ERRO CRÍTICO ao enviar email para ${recipientEmail} (Certificado: ${certificateNumber}):`)
+    console.error(`[Email] Erro:`, error)
+    console.error(`[Email] Stack:`, (error as Error).stack)
   }
 }
 
@@ -295,7 +319,9 @@ export async function POST(request: NextRequest) {
       issuedCertificateData = newCertificate
     }
 
+    console.log(`[API] 📧 Chamando função de envio de email...`)
     await sendCertificateEmail(template, recipient_data, certificateNumber, pdf_url)
+    console.log(`[API] ✅ Função de email executada`)
 
     return NextResponse.json(issuedCertificateData)
   } catch (error) {
