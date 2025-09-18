@@ -39,6 +39,7 @@ import {
   Check,
   Send,
   Loader2,
+  Play,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -165,6 +166,8 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
   const { toast } = useToast()
   const [isInitialized, setIsInitialized] = useState(false)
   const [isTestingSmtp, setIsTestingSmtp] = useState(false)
+  const [certificateLogs, setCertificateLogs] = useState<string[]>([])
+  const [isListeningLogs, setIsListeningLogs] = useState(false)
 
   // Drag and drop state
   const dragField = useRef<number | null>(null)
@@ -564,6 +567,36 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
         </div>
       </div>
     )
+  }
+
+  const startListeningCertificateLogs = () => {
+    setIsListeningLogs(true)
+    setCertificateLogs([])
+
+    // Polling para capturar logs
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch("/api/certificate-logs")
+        if (response.ok) {
+          const data = await response.json()
+          if (data.logs && data.logs.length > 0) {
+            setCertificateLogs((prev) => [...prev, ...data.logs])
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao capturar logs:", error)
+      }
+    }, 2000)
+
+    // Parar após 5 minutos
+    setTimeout(() => {
+      clearInterval(interval)
+      setIsListeningLogs(false)
+    }, 300000)
+  }
+
+  const clearCertificateLogs = () => {
+    setCertificateLogs([])
   }
 
   return (
@@ -1114,6 +1147,66 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                 Enviará um email de teste para verificar se o sistema está funcionando
                               </p>
                             </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Logs de Emissão de Certificado
+                            </CardTitle>
+                            <p className="text-xs text-gray-600">
+                              Monitore em tempo real as tentativas de emissão de certificado
+                            </p>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={startListeningCertificateLogs}
+                                disabled={isListeningLogs}
+                                className="flex-1 bg-transparent"
+                              >
+                                {isListeningLogs ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Play className="h-4 w-4 mr-2" />
+                                )}
+                                {isListeningLogs ? "Monitorando..." : "Iniciar Monitoramento"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={clearCertificateLogs}
+                                disabled={certificateLogs.length === 0}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <div className="bg-black text-green-400 p-3 rounded-lg font-mono text-xs max-h-60 overflow-y-auto">
+                              {certificateLogs.length === 0 ? (
+                                <div className="text-gray-500">
+                                  {isListeningLogs
+                                    ? "Aguardando logs..."
+                                    : "Clique em 'Iniciar Monitoramento' para ver os logs"}
+                                </div>
+                              ) : (
+                                certificateLogs.map((log, index) => (
+                                  <div key={index} className="mb-1">
+                                    {log}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            <p className="text-xs text-gray-500">
+                              {isListeningLogs
+                                ? "Monitoramento ativo por 5 minutos"
+                                : "Logs mostram tentativas de emissão de certificado"}
+                            </p>
                           </CardContent>
                         </Card>
                       </div>
