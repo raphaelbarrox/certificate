@@ -12,6 +12,9 @@ async function imageUrlToDataUrl(url: string): Promise<string> {
 
 async function sendCertificateEmail(template: any, recipientData: any, certificateNumber: string, pdfUrl: string) {
   console.log(`[v0] [Email] 🚀 Iniciando processo de envio para certificado ${certificateNumber}`)
+  
+  // ADIÇÃO 1: Log dos dados recebidos para debug
+  console.log(`[v0] [Email] Dados recebidos (todas as chaves):`, Object.keys(recipientData))
 
   const emailConfig = template.form_design?.emailConfig
   console.log(`[v0] [Email] EmailConfig completo:`, JSON.stringify(emailConfig, null, 2))
@@ -22,7 +25,8 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     return { success: false, reason: "Configuração de email não encontrada no template" }
   }
 
-  const isEnabled = emailConfig.enabled === true || emailConfig.enabled === "true" || emailConfig.enabled === 1
+  // CORREÇÃO 1: Adicionar "1" como string na verificação
+  const isEnabled = emailConfig.enabled === true || emailConfig.enabled === "true" || emailConfig.enabled === 1 || emailConfig.enabled === "1"
   console.log(`[v0] [Email] Toggle enabled (original):`, emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (tipo):`, typeof emailConfig.enabled)
   console.log(`[v0] [Email] Toggle enabled (convertido):`, isEnabled)
@@ -56,12 +60,27 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     return { success: false, reason: `Campos obrigatórios não preenchidos: ${missingFields.join(", ")}` }
   }
 
-  const recipientEmail = recipientData.default_email || recipientData.email || recipientData.recipient_email
+  // CORREÇÃO 2: Busca aprimorada do email - tenta mais chaves possíveis
+  let recipientEmail = recipientData.default_email || recipientData.email || recipientData.recipient_email
+  
+  // ADIÇÃO 2: Se não encontrou nas chaves padrão, busca em QUALQUER campo que tenha @
+  if (!recipientEmail) {
+    console.log(`[v0] [Email] Email não encontrado nas chaves padrão, buscando em todos os campos...`)
+    for (const [key, value] of Object.entries(recipientData)) {
+      if (typeof value === 'string' && value.includes('@')) {
+        recipientEmail = value
+        console.log(`[v0] [Email] Email encontrado na chave '${key}': ${recipientEmail}`)
+        break
+      }
+    }
+  }
+  
   console.log(`[v0] [Email] Buscando email do destinatário:`, {
     default_email: recipientData.default_email,
     email: recipientData.email,
     recipient_email: recipientData.recipient_email,
     emailEncontrado: recipientEmail,
+    todasAsChaves: Object.keys(recipientData) // ADIÇÃO: mostrar todas as chaves disponíveis
   })
 
   if (!recipientEmail || typeof recipientEmail !== "string" || !recipientEmail.trim()) {
@@ -96,6 +115,9 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
       certificate_link: pdfUrl,
       certificate_id: certificateNumber,
       ...recipientData,
+      // ADIÇÃO 3: Garantir que email e default_email existam nos dados de substituição
+      email: recipientEmail,
+      default_email: recipientEmail
     }
 
     console.log(`[v0] [Email] Dados para substituição:`, emailData)
@@ -103,11 +125,17 @@ async function sendCertificateEmail(template: any, recipientData: any, certifica
     let finalBody = String(body)
     let finalSubject = String(subject)
 
+    // CORREÇÃO 3: Substituição melhorada - aceita espaços dentro das chaves
     Object.keys(emailData).forEach((key) => {
       const regex = new RegExp(`{{${key}}}`, "g")
       const value = emailData[key] || ""
       finalBody = finalBody.replace(regex, String(value))
       finalSubject = finalSubject.replace(regex, String(value))
+      
+      // ADIÇÃO: Também substitui com espaços (ex: {{ key }})
+      const regexWithSpaces = new RegExp(`{{\\s*${key}\\s*}}`, "g")
+      finalBody = finalBody.replace(regexWithSpaces, String(value))
+      finalSubject = finalSubject.replace(regexWithSpaces, String(value))
     })
 
     console.log(`[v0] [Email] 📧 Preparando envio:`)
@@ -144,8 +172,25 @@ export async function POST(request: NextRequest) {
   let oldPdfPath: string | null = null // Track old PDF for deletion
 
   try {
-    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } =
-      await request.json()
+    const requestData = await request.json()
+    const { template_id, recipient_data, photo_url, certificate_number_to_update, recipient_cpf, recipient_dob } = requestData
+
+    // ADIÇÃO DEBUG: Log para rastrear os dados recebidos
+    console.log(`[API] ====== INÍCIO DO PROCESSAMENTO ======`)
+    console.log(`[API] Template ID: ${template_id}`)
+    console.log(`[API] Certificate Update: ${certificate_number_to_update || 'NOVO'}`)
+    console.log(`[API] Recipient Data Keys:`, Object.keys(recipient_data || {}))
+    console.log(`[API] Recipient Data Completo:`, JSON.stringify(recipient_data, null, 2))
+    
+    // Verificar especificamente campos de email
+    const emailFields = Object.entries(recipient_data || {})
+      .filter(([key, value]) => 
+        key.toLowerCase().includes('email') || 
+        key.toLowerCase().includes('mail') ||
+        (typeof value === 'string' && value.includes('@'))
+      )
+    console.log(`[API] Campos relacionados a email encontrados:`, emailFields)
+    console.log(`[API] =====================================`)
 
     if (!template_id || !recipient_data || !recipient_cpf || !recipient_dob) {
       return NextResponse.json(
