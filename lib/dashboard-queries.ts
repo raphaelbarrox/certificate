@@ -304,9 +304,15 @@ export class DashboardQueries {
         title,
         is_active,
         created_at,
+        updated_at,
         placeholders,
         public_link_id,
-        folder_id
+        folder_id,
+        user_id,
+        template_data,
+        form_design,
+        description,
+        thumbnail_url
       `,
         { count: "exact" },
       )
@@ -391,22 +397,54 @@ export class DashboardQueries {
     searchTerm?: string,
   ) {
     const nextPage = currentPage + 1
+
+    // Verificar se já existe cache para a próxima página
+    const cacheKey = DashboardQueries.getCacheKey(
+      "templates",
+      userId,
+      folderId || "root",
+      nextPage,
+      pageSize,
+      searchTerm || "",
+    )
+
+    const cached = DashboardQueries.templatesCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < DashboardQueries.CACHE_TTL) {
+      console.log("[v0] Preload cancelado - cache já existe para página", nextPage)
+      return
+    }
+
     // Executa em background sem await para não bloquear
-    this.getTemplatesPaginated(userId, folderId, nextPage, pageSize, searchTerm).catch(() => {
-      // Ignora erros de preload
+    this.getTemplatesPaginated(userId, folderId, nextPage, pageSize, searchTerm).catch((error) => {
+      console.warn("[v0] Erro no preload da página", nextPage, ":", error)
     })
   }
 
   static invalidateTemplatesCache(userId: string, folderId?: string | null) {
+    console.log("[v0] Invalidando cache de templates para:", { userId, folderId })
+
     if (folderId !== undefined) {
-      // Invalida apenas cache da pasta específica
+      // Invalida cache da pasta específica
       const pattern = new RegExp(`^templates:${userId}:${folderId || "root"}:`)
       this.invalidateCacheByPattern(pattern)
+
+      const templatesWithCountsPattern = new RegExp(`^templates-with-counts:${userId}:${folderId || "root"}:`)
+      this.invalidateCacheByPattern(templatesWithCountsPattern)
     } else {
       // Invalida todo cache de templates do usuário
       const pattern = new RegExp(`^templates:${userId}:`)
       this.invalidateCacheByPattern(pattern)
+
+      const templatesWithCountsPattern = new RegExp(`^templates-with-counts:${userId}:`)
+      this.invalidateCacheByPattern(templatesWithCountsPattern)
     }
+
+    this.statsCache.delete(this.getCacheKey("stats", userId))
+
+    const preloadPattern = new RegExp(`^templates:${userId}:.*:.*:.*:.*`)
+    this.invalidateCacheByPattern(preloadPattern)
+
+    console.log("[v0] Cache de templates invalidado completamente")
   }
 
   static invalidateFoldersCache(userId: string) {

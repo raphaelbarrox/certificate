@@ -31,7 +31,7 @@ import { useToast } from "@/hooks/use-toast"
 import DashboardLayout from "@/components/dashboard-layout"
 import CreateFolderDialog from "@/components/create-folder-dialog"
 import { generatePublicLinkId } from "@/lib/certificate-generator"
-import { dashboardQueries } from "@/lib/dashboard-queries"
+import { dashboardQueries, DashboardQueries } from "@/lib/dashboard-queries"
 
 const TEMPLATES_PER_PAGE = 10
 
@@ -152,29 +152,90 @@ export default function TemplatesPage() {
   const handleDuplicate = useCallback(
     async (templateId: string) => {
       const original = templates.find((t) => t.id === templateId)
-      if (!original) return
+      if (!original) {
+        console.error("[v0] Template original não encontrado:", templateId)
+        toast({ title: "Erro: Template não encontrado", variant: "destructive" })
+        return
+      }
 
-      const { id, created_at, updated_at, public_link_id, ...rest } = original
-      const newTemplate = {
-        ...rest,
-        title: `${original.title} (Cópia)`,
-        public_link_id: generatePublicLinkId(),
-        is_active: false,
+      // Prevenir duplicações múltiplas
+      const duplicateButton = document.querySelector(
+        `[title="Duplicar"][data-template-id="${templateId}"]`,
+      ) as HTMLButtonElement
+      if (duplicateButton) {
+        duplicateButton.disabled = true
       }
 
       try {
+        console.log("[v0] Iniciando duplicação do template:", templateId)
+        console.log("[v0] Template original completo:", original)
+
+        if (!original.template_data) {
+          console.error("[v0] Template sem template_data:", original)
+          throw new Error("Template sem dados de design (template_data)")
+        }
+        if (!original.user_id) {
+          console.error("[v0] Template sem user_id:", original)
+          throw new Error("Template sem proprietário (user_id)")
+        }
+        if (!original.title) {
+          console.error("[v0] Template sem title:", original)
+          throw new Error("Template sem título")
+        }
+
+        const { id, created_at, updated_at, public_link_id, ...rest } = original
+
+        const newTemplate = {
+          title: `${original.title} (Cópia)`,
+          public_link_id: generatePublicLinkId(),
+          is_active: false,
+          user_id: original.user_id,
+          template_data: JSON.parse(JSON.stringify(original.template_data)),
+          placeholders: original.placeholders ? JSON.parse(JSON.stringify(original.placeholders)) : null,
+          form_design: original.form_design ? JSON.parse(JSON.stringify(original.form_design)) : null,
+          folder_id: original.folder_id || null,
+          description: original.description || null,
+          thumbnail_url: original.thumbnail_url || null,
+        }
+
+        console.log("[v0] Dados do novo template:", newTemplate)
+
         const { data, error } = await supabase.from("certificate_templates").insert(newTemplate).select().single()
-        if (error) throw error
 
-        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
-        fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
+        if (error) {
+          console.error("[v0] Erro na inserção:", error)
+          throw error
+        }
 
-        toast({ title: "Template duplicado!" })
-      } catch (error) {
-        toast({ title: "Erro ao duplicar", variant: "destructive" })
+        console.log("[v0] Template duplicado com sucesso:", data)
+
+        DashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
+        if (currentFolder?.id) {
+          DashboardQueries.invalidateTemplatesCache(user!.id, null)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100))
+
+        await fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
+
+        toast({
+          title: "Template duplicado com sucesso!",
+          description: `"${newTemplate.title}" foi criado.`,
+        })
+      } catch (error: any) {
+        console.error("[v0] Erro completo na duplicação:", error.message || error)
+        toast({
+          title: "Erro ao duplicar template",
+          description: error.message || "Tente novamente em alguns segundos.",
+          variant: "destructive",
+        })
+      } finally {
+        if (duplicateButton) {
+          duplicateButton.disabled = false
+        }
       }
     },
-    [templates, currentFolder, currentPage, toast, supabase, user, fetchTemplates],
+    [templates, currentFolder, currentPage, toast, user, fetchTemplates],
   )
 
   const handleCopyLink = useCallback(
@@ -216,7 +277,7 @@ export default function TemplatesPage() {
         const { error } = await supabase.from("certificate_templates").delete().eq("id", templateId)
         if (error) throw error
 
-        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
+        DashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
         fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({ title: "Template excluído" })
@@ -248,7 +309,7 @@ export default function TemplatesPage() {
       if (deleteError) throw deleteError
 
       setFolders(folders.filter((f) => f.id !== folderId))
-      dashboardQueries.invalidateFoldersCache(user!.id)
+      DashboardQueries.invalidateFoldersCache(user!.id)
 
       toast({ title: "Pasta excluída", description: "Os templates foram movidos para a raiz." })
     } catch (error) {
@@ -272,8 +333,8 @@ export default function TemplatesPage() {
 
         if (error) throw error
 
-        dashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
-        dashboardQueries.invalidateTemplatesCache(user!.id, folderId)
+        DashboardQueries.invalidateTemplatesCache(user!.id, currentFolder?.id || null)
+        DashboardQueries.invalidateTemplatesCache(user!.id, folderId)
         fetchTemplates(user!.id, currentFolder?.id || null, currentPage, true)
 
         toast({
@@ -366,6 +427,7 @@ export default function TemplatesPage() {
                 size="icon"
                 className="h-7 w-7"
                 title="Duplicar"
+                data-template-id={template.id}
                 onClick={() => handleDuplicate(template.id)}
               >
                 <Copy className="h-4 w-4" />

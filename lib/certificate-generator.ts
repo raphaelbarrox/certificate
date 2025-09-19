@@ -127,7 +127,11 @@ export async function generateCertificate(
 }
 
 export function generatePublicLinkId(): string {
-  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+  // Usar timestamp + random para garantir maior unicidade
+  const timestamp = Date.now().toString(36)
+  const random1 = Math.random().toString(36).substring(2, 10)
+  const random2 = Math.random().toString(36).substring(2, 10)
+  return `${timestamp}-${random1}-${random2}`
 }
 
 // Helper function to convert file to data URL (if needed elsewhere)
