@@ -39,6 +39,110 @@ const formatDisplayLabel = (key: string): string => {
   return key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
 }
 
+const shouldDisplayField = (key: string, value: any, allData: Record<string, any>): boolean => {
+  // Ignorar campos internos de email que não devem ser exibidos
+  const internalFields = [
+    "recipient_email",
+    "recipient_name",
+    "email", // Campo genérico interno
+  ]
+
+  if (internalFields.includes(key.toLowerCase())) {
+    return false
+  }
+
+  // Ignorar campos com IDs numéricos longos (campos gerados automaticamente)
+  if (/^field_\d{13,}$/.test(key)) {
+    return false
+  }
+
+  // Ignorar imagens (URLs longas)
+  if (
+    key.toLowerCase().includes("imagem") ||
+    key.toLowerCase().includes("image") ||
+    (typeof value === "string" && value.startsWith("http") && value.length > 50)
+  ) {
+    return false
+  }
+
+  // Detectar duplicatas: se o valor é igual a outro campo já processado, ignorar
+  const normalizedValue = String(value).toLowerCase().trim()
+  const seenValues = new Set<string>()
+
+  for (const [otherKey, otherValue] of Object.entries(allData)) {
+    if (otherKey === key) continue // Pular o próprio campo
+
+    const otherNormalizedValue = String(otherValue).toLowerCase().trim()
+    if (normalizedValue === otherNormalizedValue && seenValues.has(otherNormalizedValue)) {
+      // Este é um valor duplicado, verificar qual campo tem prioridade
+      const priorityFields = ["default_email", "default_whatsapp", "nome_completo", "full_name", "participante"]
+
+      // Se o campo atual não é prioritário e já existe um campo com o mesmo valor, ignorar
+      if (!priorityFields.includes(key.toLowerCase())) {
+        return false
+      }
+    }
+    seenValues.add(otherNormalizedValue)
+  }
+
+  return true
+}
+
+const getUniqueFields = (recipientData: Record<string, any>): Array<[string, any]> => {
+  const entries = Object.entries(recipientData)
+  const uniqueEntries: Array<[string, any]> = []
+  const seenValues = new Map<string, string>() // valor normalizado -> chave preferida
+
+  // Definir prioridade de campos (campos mais descritivos têm prioridade)
+  const fieldPriority: Record<string, number> = {
+    default_email: 10,
+    default_whatsapp: 10,
+    nome_completo: 9,
+    full_name: 8,
+    participante: 7,
+    nome: 6,
+    name: 5,
+    email_profissional: 4,
+  }
+
+  for (const [key, value] of entries) {
+    // Pular campos internos
+    if (!shouldDisplayField(key, value, recipientData)) {
+      continue
+    }
+
+    const normalizedValue = String(value).toLowerCase().trim()
+
+    // Verificar se já temos um campo com este valor
+    const existingKey = seenValues.get(normalizedValue)
+
+    if (existingKey) {
+      // Já existe um campo com este valor, verificar prioridade
+      const existingPriority = fieldPriority[existingKey.toLowerCase()] || 0
+      const currentPriority = fieldPriority[key.toLowerCase()] || 0
+
+      // Se o campo atual tem maior prioridade, substituir
+      if (currentPriority > existingPriority) {
+        // Remover o campo antigo
+        const index = uniqueEntries.findIndex(([k]) => k === existingKey)
+        if (index !== -1) {
+          uniqueEntries.splice(index, 1)
+        }
+        // Adicionar o novo
+        uniqueEntries.push([key, value])
+        seenValues.set(normalizedValue, key)
+      }
+      // Caso contrário, ignorar o campo atual (manter o existente)
+    } else {
+      // Valor único, adicionar
+      uniqueEntries.push([key, value])
+      seenValues.set(normalizedValue, key)
+    }
+  }
+
+  return uniqueEntries
+}
+
 export default async function CertificatePage({ params }: CertificatePageProps) {
   const { id } = await params
 
@@ -94,25 +198,15 @@ export default async function CertificatePage({ params }: CertificatePageProps) 
               <h3 className="text-lg font-semibold text-gray-900 border-b pb-2">Dados do Certificado</h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(certificate.recipient_data).map(([key, value]) => {
-                  // Skip displaying image URLs
-                  if (
-                    key.toLowerCase().includes("imagem") ||
-                    (typeof value === "string" && value.startsWith("http") && value.length > 50)
-                  ) {
-                    return null
-                  }
-
-                  return (
-                    <div key={key} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                      <User className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-gray-700 capitalize text-sm">{formatDisplayLabel(key)}</div>
-                        <div className="text-gray-900 break-words">{formatDisplayValue(key, value)}</div>
-                      </div>
+                {getUniqueFields(certificate.recipient_data).map(([key, value]) => (
+                  <div key={key} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <User className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-gray-700 capitalize text-sm">{formatDisplayLabel(key)}</div>
+                      <div className="text-gray-900 break-words">{formatDisplayValue(key, value)}</div>
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             </div>
 
