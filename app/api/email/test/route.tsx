@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
           <hr style="margin: 20px 0;">
           <p><strong>Remetente:</strong> ${senderName || "Sistema"}</p>
           <p><strong>Email:</strong> ${senderEmail}</p>
-          <p><strong>Sistema:</strong> Resend API via therapist.international</p>
+          <p><strong>Sistema:</strong> SendGrid API via therapist.international</p>
           <br>
           <p style="color: #16a34a; font-weight: bold;">✅ Sistema configurado e funcionando!</p>
         </div>

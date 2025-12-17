@@ -1081,7 +1081,7 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                               Sistema de Email Nativo
                             </CardTitle>
                             <p className="text-xs text-gray-600">
-                              Sistema integrado usando Resend API com domínio therapist.international
+                              Sistema integrado usando SendGrid API com domínio therapist.international
                             </p>
                           </CardHeader>
                           <CardContent className="space-y-4">
@@ -1092,7 +1092,7 @@ export default function FormDesigner({ onStateChange, initialData, availablePlac
                                 </div>
                                 <p className="text-sm font-medium text-green-800">Sistema Configurado</p>
                                 <p className="text-xs text-green-600 mt-1">
-                                  Emails serão enviados automaticamente via therapist.international
+                                  Emails serão enviados automaticamente via SendGrid (therapist.international)
                                 </p>
                               </div>
                             </div>
